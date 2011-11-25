@@ -68,7 +68,11 @@ typedef struct
 	 * gralloc_module_t. The framebuffer_device_t does not need a handle,
 	 * and the special value IMG_FRAMEBUFFER_FD is used instead.
 	 */
+#ifdef USE_MOTOROLA_CODE
+        int fd[1];
+#else
 	int fd[MAX_SUB_ALLOCS];
+#endif
 
 #define IMG_NATIVE_HANDLE_NUMINTS ((sizeof(unsigned long long) / sizeof(int)) + 5)
 	/* A KERNEL unique identifier for any exported kernel meminfo. Each
@@ -93,10 +97,21 @@ typedef struct
 	 */
 	int iWidth;
 	int iHeight;
+#ifdef USE_MOTOROLA_CODE
+	unsigned int uiBpp;
+	int iFormat;
+        void* vptr;	/* pointer to base address */
+        int pid;	/* process id */
+        int m_size;	/* mapped region size */
+        off_t m_offset;	/* mapped region offset into tiler */
+        int queued;	/* Is the buffer queued - must be protected */
+#else
 	int iFormat;
 	unsigned int uiBpp;
+#endif
 }
 __attribute__((aligned(sizeof(int)),packed)) IMG_native_handle_t;
+
 
 typedef struct
 {
@@ -163,5 +178,9 @@ typedef struct IMG_buffer_format_public_t
 	int bGPURenderable;
 }
 IMG_buffer_format_public_t;
+
+
+/* FIXME: Stub for compile. Need this normally defined in overlay.h somewhere */
+#define HWC_EXTERNAL_DISPLAY_CONNECTED 0x00
 
 #endif /* HAL_PUBLIC_H */

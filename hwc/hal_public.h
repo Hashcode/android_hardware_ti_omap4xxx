@@ -69,7 +69,7 @@ typedef struct
 	 * and the special value IMG_FRAMEBUFFER_FD is used instead.
 	 */
 #ifdef USE_MOTOROLA_CODE
-        int fd[1];
+        int fd[0];
 #else
 	int fd[MAX_SUB_ALLOCS];
 #endif

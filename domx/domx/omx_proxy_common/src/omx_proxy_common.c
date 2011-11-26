@@ -1047,8 +1047,8 @@ static OMX_ERRORTYPE PROXY_UseBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 
 		if(pCompPrv->proxyPortBuffers[nPortIndex].proxyBufferType == GrallocPointers)
 		{
-			((OMX_TI_PLATFORMPRIVATE *) pBufferHeader->pPlatformPrivate)->
-				pAuxBuf1 = (OMX_U8 *)(((IMG_native_handle_t*)pBuffer)->fd[1]);
+			DOMX_ERROR("FIXME: Shouldn't be here, no AuxBuf1 on Moto OMAP4 44xx");
+			//((OMX_TI_PLATFORMPRIVATE *) pBufferHeader->pPlatformPrivate)->pAuxBuf1 = (OMX_U8 *)(((IMG_native_handle_t*)pBuffer)->fd[1]);
 		}
 #if 0
 		else

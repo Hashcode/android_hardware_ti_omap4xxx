@@ -32,5 +32,5 @@ LOCAL_C_INCLUDES := \
 LOCAL_MODULE := hwcomposer.omap4
 LOCAL_CFLAGS := -DLOG_TAG=\"ti_hwc\" -Wall -Werror
 # LOG_NDEBUG=0 means verbose logging enabled
-# LOCAL_CFLAGS += -DLOG_NDEBUG=0
+LOCAL_CFLAGS += -DLOG_NDEBUG=0
 include $(BUILD_SHARED_LIBRARY)

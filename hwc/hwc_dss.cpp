@@ -117,9 +117,9 @@ static void dump_layer(int i, hwc_layer_t const* l) {
         "usage=%08x, bpp=%i format=%d vptr=%p pid=%d m_size=%d "
         "m_offest=%d queued=%d width=%d height=%d",
         i, l->compositionType, l->flags, handle, l->transform, l->blending,
-        handle->usage, handle->bpp, handle->format, handle->vptr,handle->pid,
-        handle->m_size, (int)handle->m_offset, handle->queued, handle->width,
-        handle->height);
+        handle->usage, handle->uiBpp, handle->iFormat, handle->vptr,handle->pid,
+        handle->m_size, (int)handle->m_offset, handle->queued, handle->iWidth,
+        handle->iHeight);
 }
 
 

@@ -43,7 +43,7 @@
 #define HWC_PLAT_EXTERNALDISPLAY_NO 1
 
 /* Framebuffer device node names */
-#define FB_DEV_NAME "/dev/fb0"
+#define FB_DEV_NAME "/dev/graphics/fb0"
 #define FB_DEV_NAME_FALLBACK "/dev/graphics/fb0"
 
 int init_hwc_dss(void);

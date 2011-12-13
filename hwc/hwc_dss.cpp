@@ -45,7 +45,7 @@
 /*
  * this is to mark temporary code for hdmi cloning
  */
-#define HDMI_DEMO
+// #define HDMI_DEMO
 
 /*
  * struct pipeline_state::pipe

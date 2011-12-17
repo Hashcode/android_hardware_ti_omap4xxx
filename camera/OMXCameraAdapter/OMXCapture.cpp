@@ -57,7 +57,7 @@ status_t OMXCameraAdapter::setParametersCapture(const CameraParameters &params,
     cap->mWidth = w;
     cap->mHeight = h;
     //TODO: Support more pixelformats
-    cap->mStride = 2;
+    //cap->mStride = 2;
 
     CAMHAL_LOGVB("Image: cap.mWidth = %d", (int)cap->mWidth);
     CAMHAL_LOGVB("Image: cap.mHeight = %d", (int)cap->mHeight);
@@ -741,6 +741,11 @@ status_t OMXCameraAdapter::startImageCapture()
         return NO_INIT;
         }
 
+    if ((getNextState() & (CAPTURE_ACTIVE|BRACKETING_ACTIVE)) == 0) {
+        CAMHAL_LOGDA("trying starting capture when already canceled");
+        return NO_ERROR;
+    }
+
     // Camera framework doesn't expect face callbacks once capture is triggered
     pauseFaceDetection(true);
 
@@ -832,8 +837,8 @@ status_t OMXCameraAdapter::startImageCapture()
             ret = mStartCaptureSem.WaitTimeout(OMX_CAPTURE_TIMEOUT);
             }
 
-        //If somethiing bad happened while we wait
-        if (mComponentState == OMX_StateInvalid)
+        //If something bad happened while we wait
+        if (mComponentState != OMX_StateExecuting)
           {
             CAMHAL_LOGEA("Invalid State after Image Capture Exitting!!!");
             goto EXIT;
@@ -899,12 +904,13 @@ status_t OMXCameraAdapter::stopImageCapture()
         // if anybody is waiting on the shutter callback
         // signal them and then recreate the semaphore
         if ( 0 != mStartCaptureSem.Count() ) {
-            for (int i = mStopCaptureSem.Count(); i > 0; i--) {
-                ret |= SignalEvent(mCameraAdapterParameters.mHandleComp,
-                                   (OMX_EVENTTYPE) OMX_EventIndexSettingChanged,
-                                   OMX_ALL,
-                                   OMX_TI_IndexConfigShutterCallback,
-                                   NULL );
+
+            for (int i = mStartCaptureSem.Count(); i < 0; i++) {
+            ret |= SignalEvent(mCameraAdapterParameters.mHandleComp,
+                               (OMX_EVENTTYPE) OMX_EventIndexSettingChanged,
+                               OMX_ALL,
+                               OMX_TI_IndexConfigShutterCallback,
+                               NULL );
             }
             mStartCaptureSem.Create(0);
         }
@@ -915,7 +921,7 @@ status_t OMXCameraAdapter::stopImageCapture()
     stopFaceDetection();
 
     //Wait here for the capture to be done, in worst case timeout and proceed with cleanup
-    ret = mCaptureSem.WaitTimeout(OMX_CAPTURE_TIMEOUT);
+    mCaptureSem.WaitTimeout(OMX_CAPTURE_TIMEOUT);
 
     //If somethiing bad happened while we wait
     if (mComponentState == OMX_StateInvalid)
@@ -923,16 +929,6 @@ status_t OMXCameraAdapter::stopImageCapture()
         CAMHAL_LOGEA("Invalid State Image Capture Stop Exitting!!!");
         goto EXIT;
       }
-
-    if ( NO_ERROR != ret ) {
-        ret |= RemoveEvent(mCameraAdapterParameters.mHandleComp,
-                           (OMX_EVENTTYPE) OMX_EventIndexSettingChanged,
-                           OMX_ALL,
-                           OMX_TI_IndexConfigShutterCallback,
-                           NULL);
-        CAMHAL_LOGEA("Timeout expired on capture sem");
-        goto EXIT;
-    }
 
     // Disable image capture
     // Capturing command is not needed when capturing in video mode

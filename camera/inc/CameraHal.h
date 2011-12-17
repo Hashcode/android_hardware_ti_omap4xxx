@@ -77,6 +77,8 @@
 #define LOCK_BUFFER_TRIES 5
 #define HAL_PIXEL_FORMAT_NV12 0x100
 
+#define CAMHAL_LOGI LOGI
+
 //Uncomment to enable more verbose/debug logs
 //#define DEBUG_LOG
 
@@ -566,8 +568,6 @@ public:
     //Set Burst mode
     void setBurst(bool burst);
 
-    int setParameters(const CameraParameters& params);
-
     //Notifications from CameraHal for video recording case
     status_t startRecording();
     status_t stopRecording();
@@ -582,6 +582,8 @@ public:
 
     bool getUesVideoBuffers();
     void setVideoRes(int width, int height);
+
+    void flushEventQueue();
 
     //Internal class definitions
     class NotificationThread : public Thread {
@@ -661,8 +663,6 @@ private:
 
     bool mUseMetaDataBufferMode;
     bool mRawAvailable;
-
-    CameraParameters mParameters;
 
     bool mUseVideoBuffers;
 
@@ -832,6 +832,15 @@ public:
 
     // Receive orientation events from CameraHal
     virtual void onOrientationEvent(uint32_t orientation, uint32_t tilt) = 0;
+
+    // Rolls the state machine back to INTIALIZED_STATE from the current state
+    virtual status_t rollbackToInitializedState() = 0;
+
+    // Retrieves the current Adapter state - for internal use (not locked)
+    virtual status_t getState(AdapterState &state) = 0;
+    // Retrieves the next Adapter state - for internal use (not locked)
+    virtual status_t getNextState(AdapterState &state) = 0;
+
 protected:
     //The first two methods will try to switch the adapter state.
     //Every call to setState() should be followed by a corresponding
@@ -840,11 +849,6 @@ protected:
     virtual status_t setState(CameraCommands operation) = 0;
     virtual status_t commitState() = 0;
     virtual status_t rollbackState() = 0;
-
-    // Retrieves the current Adapter state - for internal use (not locked)
-    virtual status_t getState(AdapterState &state) = 0;
-    // Retrieves the next Adapter state - for internal use (not locked)
-    virtual status_t getNextState(AdapterState &state) = 0;
 };
 
 class DisplayAdapter : public BufferProvider, public virtual RefBase

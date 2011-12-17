@@ -225,7 +225,7 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     {
         if( ret == INVALID_OPERATION){
             CAMHAL_LOGDA("command handler thread already runnning!!");
-	    ret = NO_ERROR;
+            ret = NO_ERROR;
         } else
         {
             CAMHAL_LOGEA("Couldn't run command handlerthread");
@@ -248,7 +248,7 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     {
         if( ret == INVALID_OPERATION){
             CAMHAL_LOGDA("omx callback handler thread already runnning!!");
-	    ret = NO_ERROR;
+            ret = NO_ERROR;
         }else
         {
             CAMHAL_LOGEA("Couldn't run omx callback handler thread");
@@ -261,11 +261,11 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
         for (unsigned int i = 0 ;i < mEventSignalQ.size(); i++ ) {
             TIUTILS::Message *msg = mEventSignalQ.itemAt(i);
             //remove from queue and free msg
-            mEventSignalQ.removeAt(i);
             if ( NULL != msg ) {
                 free(msg);
             }
         }
+        mEventSignalQ.clear();
     }
 
     OMX_INIT_STRUCT_PTR (&mRegionPriority, OMX_TI_CONFIG_3A_REGION_PRIORITY);
@@ -297,7 +297,7 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
 
     EXIT:
 
-    CAMHAL_LOGEB("Exiting function %s because of ret %d eError=%x", __FUNCTION__, ret, eError);
+    CAMHAL_LOGDB("Exiting function %s because of ret %d eError=%x", __FUNCTION__, ret, eError);
     performCleanupAfterError();
     LOG_FUNCTION_NAME_EXIT;
     return ErrorUtils::omxToAndroidError(eError);
@@ -864,6 +864,7 @@ status_t OMXCameraAdapter::setFormat(OMX_U32 port, OMXCameraPortParameters &port
     GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
 
     portParams.mBufSize = portCheck.nBufferSize;
+    portParams.mStride = portCheck.format.image.nStride;
 
     if ( OMX_CAMERA_PORT_IMAGE_OUT_IMAGE == port )
         {
@@ -1757,6 +1758,7 @@ status_t OMXCameraAdapter::startPreview()
     OMX_ERRORTYPE eError = OMX_ErrorNone;
     OMXCameraPortParameters *mPreviewData = NULL;
     OMXCameraPortParameters *measurementData = NULL;
+    OMX_CONFIG_EXTRADATATYPE extraDataControl;
 
     LOG_FUNCTION_NAME;
 
@@ -1829,6 +1831,7 @@ status_t OMXCameraAdapter::startPreview()
 
     mStateSwitchLock.unlock();
 
+    apply3Asettings(mParameters3A);
     //Queue all the buffers on preview port
     for(int index=0;index< mPreviewData->mMaxQueueable;index++)
         {
@@ -1863,8 +1866,30 @@ status_t OMXCameraAdapter::startPreview()
 
         }
 
+    // Enable Ancillary data. The nDCCStatus field is used to signify
+    // whether the preview frame is a snapshot
+    if ( OMX_ErrorNone == eError)
+        {
+        OMX_INIT_STRUCT_PTR (&extraDataControl, OMX_CONFIG_EXTRADATATYPE);
+        extraDataControl.nPortIndex = OMX_ALL;
+        extraDataControl.eExtraDataType = OMX_AncillaryData;
+        extraDataControl.bEnable = OMX_TRUE;
+
+        eError =  OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
+                               ( OMX_INDEXTYPE ) OMX_IndexConfigOtherExtraDataControl,
+                               &extraDataControl);
+        GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
+        }
+
+
     if ( mPending3Asettings )
         apply3Asettings(mParameters3A);
+
+    // enable focus callbacks just once here
+    // fixes an issue with slow callback registration in Ducati
+    if ( NO_ERROR == ret ) {
+        ret = setFocusCallback(true);
+    }
 
     //reset frame rate estimates
     mFPS = 0.0f;
@@ -1919,6 +1944,20 @@ status_t OMXCameraAdapter::stopPreview()
 
     {
         Mutex::Autolock lock(mFrameCountMutex);
+        // we should wait for the first frame to come before trying to stopPreview...if not
+        // we might put OMXCamera in a bad state (IDLE->LOADED timeout). Seeing this a lot
+        // after a capture
+        if (mFrameCount < 1) {
+            // I want to wait for at least two frames....
+            mFrameCount = -1;
+
+            // first frame may time some time to come...so wait for an adequate amount of time
+            // which 2 * OMX_CAPTURE_TIMEOUT * 1000 will cover.
+            ret = mFirstFrameCondition.waitRelative(mFrameCountMutex,
+                                                    (nsecs_t) 2 * OMX_CAPTURE_TIMEOUT * 1000);
+        }
+        // even if we timeout waiting for the first frame...go ahead with trying to stop preview
+        // signal anybody that might be waiting
         mFrameCount = 0;
         mFirstFrameCondition.broadcast();
     }
@@ -2608,7 +2647,6 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterEventHandler(OMX_IN OMX_HANDLETY
                         if ( NULL != msg )
                           {
                             Semaphore *sem  = (Semaphore*) msg->arg3;
-                            mEventSignalQ.removeAt(i);
                             if ( sem )
                               {
                                 sem->Signal();
@@ -2616,6 +2654,7 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterEventHandler(OMX_IN OMX_HANDLETY
                             free(msg);
                           }
                       }
+                    mEventSignalQ.clear();
                   }
                 ///Report Error to App
                 mErrorNotifier->errorNotify(CAMERA_ERROR_FATAL);
@@ -2698,7 +2737,7 @@ OMX_ERRORTYPE OMXCameraAdapter::SignalEvent(OMX_IN OMX_HANDLETYPE hComponent,
         }
     else
         {
-        CAMHAL_LOGEA("Event queue empty!!!");
+        CAMHAL_LOGDA("Event queue empty!!!");
         }
 
     LOG_FUNCTION_NAME_EXIT;
@@ -2878,6 +2917,10 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
     sp<CameraFDResult> fdResult = NULL;
     unsigned int mask = 0xFFFF;
     CameraFrame cameraFrame;
+    OMX_TI_PLATFORMPRIVATE *platformPrivate;
+    OMX_OTHER_EXTRADATATYPE *extraData;
+    OMX_TI_ANCILLARYDATATYPE *ancillaryData;
+    bool snapshotFrame = false;
 
     res1 = res2 = NO_ERROR;
     pPortParam = &(mCameraAdapterParameters.mCameraPortParams[pBuffHeader->nOutputPortIndex]);
@@ -2893,6 +2936,19 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
         if ( ( PREVIEW_ACTIVE & state ) != PREVIEW_ACTIVE )
             {
             return OMX_ErrorNone;
+            }
+
+        if ( mWaitingForSnapshot )
+            {
+            platformPrivate = (OMX_TI_PLATFORMPRIVATE*) pBuffHeader->pPlatformPrivate;
+            extraData = getExtradata((OMX_OTHER_EXTRADATATYPE*) platformPrivate->pMetaDataBuffer,
+                    (OMX_EXTRADATATYPE) OMX_AncillaryData);
+
+            if ( NULL != extraData )
+                {
+                ancillaryData = (OMX_TI_ANCILLARYDATATYPE*) extraData->data;
+                snapshotFrame = ancillaryData->nDCCStatus;
+                }
             }
 
         recalculateFPS();
@@ -2914,15 +2970,19 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
             }
 
         ///Prepare the frames to be sent - initialize CameraFrame object and reference count
-        if( mWaitingForSnapshot &&  (mCapturedFrames > 0) )
+        // TODO(XXX): ancillary data for snapshot frame is not being sent for video snapshot
+        //            if we are waiting for a snapshot and in video mode...go ahead and send
+        //            this frame as a snapshot
+        if( mWaitingForSnapshot &&  (mCapturedFrames > 0) &&
+            (snapshotFrame || (mCapMode == VIDEO_MODE)))
             {
             typeOfFrame = CameraFrame::SNAPSHOT_FRAME;
             mask = (unsigned int)CameraFrame::SNAPSHOT_FRAME;
             }
         else
             {
-              typeOfFrame = CameraFrame::PREVIEW_FRAME_SYNC;
-              mask = (unsigned int)CameraFrame::PREVIEW_FRAME_SYNC;
+            typeOfFrame = CameraFrame::PREVIEW_FRAME_SYNC;
+            mask = (unsigned int)CameraFrame::PREVIEW_FRAME_SYNC;
             }
 
         if (mRecording)
@@ -3250,7 +3310,10 @@ bool OMXCameraAdapter::CommandHandler::Handler()
         stat = NO_ERROR;
         CAMHAL_LOGDA("Handler: waiting for messsage...");
         TIUTILS::MessageQueue::waitForMsg(&mCommandMsgQ, NULL, NULL, -1);
+        {
+        Mutex::Autolock lock(mLock);
         mCommandMsgQ.get(&msg);
+        }
         CAMHAL_LOGDB("msg.command = %d", msg.command);
         switch ( msg.command ) {
             case CommandHandler::CAMERA_START_IMAGE_CAPTURE:
@@ -3265,7 +3328,7 @@ bool OMXCameraAdapter::CommandHandler::Handler()
             }
             case CommandHandler::COMMAND_EXIT:
             {
-                CAMHAL_LOGEA("Exiting command handler");
+                CAMHAL_LOGDA("Exiting command handler");
                 forever = 0;
                 break;
             }
@@ -3276,14 +3339,6 @@ bool OMXCameraAdapter::CommandHandler::Handler()
             }
         }
 
-        if ( NO_ERROR != stat )
-            {
-            errorNotify = ( ErrorNotifier * ) msg.arg1;
-            if ( NULL != errorNotify )
-                {
-                errorNotify->errorNotify(CAMERA_ERROR_HARD);
-                }
-            }
         }
 
     LOG_FUNCTION_NAME_EXIT;
@@ -3301,7 +3356,11 @@ bool OMXCameraAdapter::OMXCallbackHandler::Handler()
 
     while(forever){
         TIUTILS::MessageQueue::waitForMsg(&mCommandMsgQ, NULL, NULL, -1);
+        {
+        Mutex::Autolock lock(mLock);
         mCommandMsgQ.get(&msg);
+        }
+
         switch ( msg.command ) {
             case OMXCallbackHandler::CAMERA_FILL_BUFFER_DONE:
             {
@@ -3311,7 +3370,7 @@ bool OMXCameraAdapter::OMXCallbackHandler::Handler()
             }
             case CommandHandler::COMMAND_EXIT:
             {
-                CAMHAL_LOGEA("Exiting OMX callback handler");
+                CAMHAL_LOGDA("Exiting OMX callback handler");
                 forever = 0;
                 break;
             }
@@ -3320,6 +3379,23 @@ bool OMXCameraAdapter::OMXCallbackHandler::Handler()
 
     LOG_FUNCTION_NAME_EXIT;
     return false;
+}
+
+OMX_OTHER_EXTRADATATYPE *OMXCameraAdapter::getExtradata(OMX_OTHER_EXTRADATATYPE *extraData, OMX_EXTRADATATYPE type)
+{
+  if ( NULL != extraData )
+      {
+      while ( extraData->nDataSize != 0 )
+          {
+          if ( type == extraData->eType )
+              {
+              return extraData;
+              }
+          extraData = (OMX_OTHER_EXTRADATATYPE*) ((char*)extraData + extraData->nSize);
+          }
+      }
+  // Required extradata type wasn't found
+  return NULL;
 }
 
 OMXCameraAdapter::OMXCameraAdapter(size_t sensor_index): mComponentState (OMX_StateLoaded)
@@ -3392,12 +3468,12 @@ OMXCameraAdapter::~OMXCameraAdapter()
             if ( NULL != msg )
               {
                 Semaphore *sem  = (Semaphore*) msg->arg3;
-                mEventSignalQ.removeAt(i);
                 sem->Signal();
                 free(msg);
 
               }
           }
+       mEventSignalQ.clear();
       }
 
     //Exit and free ref to command handling thread
@@ -3406,6 +3482,7 @@ OMXCameraAdapter::~OMXCameraAdapter()
         TIUTILS::Message msg;
         msg.command = CommandHandler::COMMAND_EXIT;
         msg.arg1 = mErrorNotifier;
+        mCommandHandler->clearCommandQ();
         mCommandHandler->put(&msg);
         mCommandHandler->requestExitAndWait();
         mCommandHandler.clear();
@@ -3416,6 +3493,8 @@ OMXCameraAdapter::~OMXCameraAdapter()
     {
         TIUTILS::Message msg;
         msg.command = OMXCallbackHandler::COMMAND_EXIT;
+        //Clear all messages pending first
+        mOMXCallbackHandler->clearCommandQ();
         mOMXCallbackHandler->put(&msg);
         mOMXCallbackHandler->requestExitAndWait();
         mOMXCallbackHandler.clear();
@@ -3549,4 +3628,3 @@ extern "C" int CameraAdapter_Capabilities(CameraProperties::Properties* properti
 
 
 /*--------------------Camera Adapter Class ENDS here-----------------------------*/
-

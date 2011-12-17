@@ -640,6 +640,8 @@ private:
     status_t setAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE pACMode, OMX_S32 pManualConverence);
     status_t getAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE *pACMode, OMX_S32 *pManualConverence);
 
+    OMX_OTHER_EXTRADATATYPE *getExtradata(OMX_OTHER_EXTRADATATYPE *extraData, OMX_EXTRADATATYPE type);
+
     class CommandHandler : public Thread {
         public:
             CommandHandler(OMXCameraAdapter* ca)
@@ -652,8 +654,15 @@ private:
             }
 
             status_t put(TIUTILS::Message* msg){
+                Mutex::Autolock lock(mLock);
                 return mCommandMsgQ.put(msg);
             }
+
+            void clearCommandQ()
+                {
+                Mutex::Autolock lock(mLock);
+                mCommandMsgQ.clear();
+                }
 
             enum {
                 COMMAND_EXIT = -1,
@@ -666,6 +675,7 @@ private:
             bool Handler();
             TIUTILS::MessageQueue mCommandMsgQ;
             OMXCameraAdapter* mCameraAdapter;
+            Mutex mLock;
     };
     sp<CommandHandler> mCommandHandler;
 
@@ -683,8 +693,15 @@ public:
         }
 
         status_t put(TIUTILS::Message* msg){
+            Mutex::Autolock lock(mLock);
             return mCommandMsgQ.put(msg);
         }
+
+        void clearCommandQ()
+            {
+            Mutex::Autolock lock(mLock);
+            mCommandMsgQ.clear();
+            }
 
         enum {
             COMMAND_EXIT = -1,
@@ -695,6 +712,7 @@ public:
         bool Handler();
         TIUTILS::MessageQueue mCommandMsgQ;
         OMXCameraAdapter* mCameraAdapter;
+        Mutex mLock;
     };
 
     sp<OMXCallbackHandler> mOMXCallbackHandler;

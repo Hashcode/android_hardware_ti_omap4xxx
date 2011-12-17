@@ -693,7 +693,7 @@ int CameraHal::setParameters(const CameraParameters& params)
 
         if( (valstr = params.get(CameraParameters::KEY_FOCUS_AREAS)) != NULL )
             {
-            CAMHAL_LOGEB("Focus areas position set %s", params.get(CameraParameters::KEY_FOCUS_AREAS));
+            CAMHAL_LOGI("Focus areas position set %s", params.get(CameraParameters::KEY_FOCUS_AREAS));
             mParameters.set(CameraParameters::KEY_FOCUS_AREAS, valstr);
             }
 
@@ -910,7 +910,7 @@ int CameraHal::setParameters(const CameraParameters& params)
           }
         if( (valstr = params.get(CameraParameters::KEY_METERING_AREAS)) != NULL )
             {
-            CAMHAL_LOGEB("Metering areas position set %s", params.get(CameraParameters::KEY_METERING_AREAS));
+            CAMHAL_LOGI("Metering areas position set %s", params.get(CameraParameters::KEY_METERING_AREAS));
             mParameters.set(CameraParameters::KEY_METERING_AREAS, valstr);
             }
 
@@ -1006,10 +1006,6 @@ int CameraHal::setParameters(const CameraParameters& params)
     //On fail restore old parameters
     if ( NO_ERROR != ret ) {
         mParameters.unflatten(oldParams.flatten());
-    }
-
-    if ( NULL != mAppCallbackNotifier.get() ) {
-        mAppCallbackNotifier->setParameters(mParameters);
     }
 
     // Restart Preview if needed by KEY_RECODING_HINT only if preview is already running.
@@ -1435,7 +1431,7 @@ status_t CameraHal::startPreview()
 
     ///If we don't have the preview callback enabled and display adapter,
     if(!mSetPreviewWindowCalled || (mDisplayAdapter.get() == NULL)){
-      CAMHAL_LOGEA("Preview not started. Preview in progress flag set");
+      CAMHAL_LOGI("Preview not started. Preview in progress flag set");
       mPreviewStartInProgress = true;
       ret = mCameraAdapter->sendCommand(CameraAdapter::CAMERA_SWITCH_TO_EXECUTING);
       if ( NO_ERROR != ret ){
@@ -1664,13 +1660,13 @@ status_t CameraHal::setPreviewWindow(struct preview_stream_ops *window)
         if(mDisplayAdapter.get() != NULL)
         {
             ///NULL window passed, destroy the display adapter if present
-            CAMHAL_LOGEA("NULL window passed, destroying display adapter");
+            CAMHAL_LOGI("NULL window passed, destroying display adapter");
             mDisplayAdapter.clear();
             ///@remarks If there was a window previously existing, we usually expect another valid window to be passed by the client
             ///@remarks so, we will wait until it passes a valid window to begin the preview again
             mSetPreviewWindowCalled = false;
         }
-        CAMHAL_LOGEA("NULL ANativeWindow passed to setPreviewWindow");
+        CAMHAL_LOGI("NULL ANativeWindow passed to setPreviewWindow");
         return NO_ERROR;
     }else if(mDisplayAdapter.get() == NULL)
     {
@@ -2162,17 +2158,30 @@ status_t CameraHal::autoFocus()
 
 #endif
 
-
     LOG_FUNCTION_NAME;
 
-    {
     Mutex::Autolock lock(mLock);
+
     mMsgEnabled |= CAMERA_MSG_FOCUS;
-    }
 
-
-    if ( NULL != mCameraAdapter )
+    if ( NULL == mCameraAdapter )
         {
+            ret = -1;
+            goto EXIT;
+        }
+
+    CameraAdapter::AdapterState state;
+    ret = mCameraAdapter->getState(state);
+    if (ret != NO_ERROR)
+        {
+            goto EXIT;
+        }
+
+    if (state == CameraAdapter::AF_STATE)
+        {
+            CAMHAL_LOGI("Ignoring start-AF (already in progress)");
+            goto EXIT;
+        }
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 
@@ -2185,12 +2194,7 @@ status_t CameraHal::autoFocus()
 
 #endif
 
-        }
-    else
-        {
-            ret = -1;
-        }
-
+EXIT:
     LOG_FUNCTION_NAME_EXIT;
 
     return ret;
@@ -2222,6 +2226,7 @@ status_t CameraHal::cancelAutoFocus()
         adapterParams.set(TICameraParameters::KEY_AUTO_FOCUS_LOCK, CameraParameters::FALSE);
         mCameraAdapter->setParameters(adapterParams);
         mCameraAdapter->sendCommand(CameraAdapter::CAMERA_CANCEL_AUTOFOCUS);
+        mAppCallbackNotifier->flushEventQueue();
     }
 
     LOG_FUNCTION_NAME_EXIT;
@@ -3373,36 +3378,17 @@ void CameraHal::forceStopPreview()
     }
 
     if ( NULL != mCameraAdapter ) {
-        CameraAdapter::AdapterState currentState;
-        CameraAdapter::AdapterState nextState;
-
-        currentState = mCameraAdapter->getState();
-        nextState = mCameraAdapter->getNextState();
-
-        // since prerequisite for capturing is for camera system
-        // to be previewing...cancel all captures before stopping
-        // preview
-        if ( (currentState == CameraAdapter::CAPTURE_STATE) &&
-             (nextState != CameraAdapter::PREVIEW_STATE)) {
-            mCameraAdapter->sendCommand(CameraAdapter::CAMERA_STOP_IMAGE_CAPTURE);
-        }
-
         // only need to send these control commands to state machine if we are
         // passed the LOADED_PREVIEW_STATE
-        if (currentState > CameraAdapter::LOADED_PREVIEW_STATE) {
+        if (mCameraAdapter->getState() > CameraAdapter::LOADED_PREVIEW_STATE) {
            // according to javadoc...FD should be stopped in stopPreview
            // and application needs to call startFaceDection again
            // to restart FD
            mCameraAdapter->sendCommand(CameraAdapter::CAMERA_STOP_FD);
-           mCameraAdapter->sendCommand(CameraAdapter::CAMERA_CANCEL_AUTOFOCUS);
         }
 
-        // only need to send these control commands to state machine if we are
-        // passed the INITIALIZED_STATE
-        if (currentState > CameraAdapter::INTIALIZED_STATE) {
-           //Stop the source of frames
-           mCameraAdapter->sendCommand(CameraAdapter::CAMERA_STOP_PREVIEW);
-        }
+        mCameraAdapter->rollbackToInitializedState();
+
     }
 
     freePreviewBufs();

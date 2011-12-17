@@ -310,7 +310,10 @@ void AppCallbackNotifier::notifyEvent()
     ///Receive and send the event notifications to app
     TIUTILS::Message msg;
     LOG_FUNCTION_NAME;
+    {
+    Mutex::Autolock lock(mLock);
     mEventQ.get(&msg);
+    }
     bool ret = true;
     CameraHalEvent *evt = NULL;
     CameraHalEvent::FocusEventData *focusEvtData;
@@ -820,12 +823,17 @@ void AppCallbackNotifier::notifyFrame()
                         buf = raw_picture->data;
                     }
 
-                    encode_quality = mParameters.getInt(CameraParameters::KEY_JPEG_QUALITY);
+                    CameraParameters parameters;
+                    char *params = mCameraHal->getParameters();
+                    const String8 strParams(params);
+                    parameters.unflatten(strParams);
+
+                    encode_quality = parameters.getInt(CameraParameters::KEY_JPEG_QUALITY);
                     if (encode_quality < 0 || encode_quality > 100) {
                         encode_quality = 100;
                     }
 
-                    tn_quality = mParameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_QUALITY);
+                    tn_quality = parameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_QUALITY);
                     if (tn_quality < 0 || tn_quality > 100) {
                         tn_quality = 100;
                     }
@@ -836,21 +844,31 @@ void AppCallbackNotifier::notifyFrame()
 
                     main_jpeg = (Encoder_libjpeg::params*)
                                     malloc(sizeof(Encoder_libjpeg::params));
+
+                    // Video snapshot with LDCNSF on adds a few bytes start offset
+                    // and a few bytes on every line. They must be skipped.
+                    int rightCrop = frame->mAlignment/2 - frame->mWidth;
+
+                    CAMHAL_LOGDB("Video snapshot right crop = %d", rightCrop);
+                    CAMHAL_LOGDB("Video snapshot offset = %d", frame->mOffset);
+
                     if (main_jpeg) {
                         main_jpeg->src = (uint8_t*) frame->mBuffer;
                         main_jpeg->src_size = frame->mLength;
                         main_jpeg->dst = (uint8_t*) buf;
                         main_jpeg->dst_size = frame->mLength;
                         main_jpeg->quality = encode_quality;
-                        main_jpeg->in_width = frame->mWidth;
+                        main_jpeg->in_width = frame->mAlignment/2; // use stride here
                         main_jpeg->in_height = frame->mHeight;
-                        main_jpeg->out_width = frame->mWidth;
+                        main_jpeg->out_width = frame->mAlignment/2;
                         main_jpeg->out_height = frame->mHeight;
+                        main_jpeg->right_crop = rightCrop;
+                        main_jpeg->start_offset = frame->mOffset;
                         main_jpeg->format = CameraParameters::PIXEL_FORMAT_YUV422I;
                     }
 
-                    tn_width = mParameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH);
-                    tn_height = mParameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT);
+                    tn_width = parameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH);
+                    tn_height = parameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT);
 
                     if ((tn_width > 0) && (tn_height > 0)) {
                         tn_jpeg = (Encoder_libjpeg::params*)
@@ -863,7 +881,7 @@ void AppCallbackNotifier::notifyFrame()
 
                     if (tn_jpeg) {
                         int width, height;
-                        mParameters.getPreviewSize(&width,&height);
+                        parameters.getPreviewSize(&width,&height);
                         current_snapshot = (mPreviewBufCount + MAX_BUFFERS - 1) % MAX_BUFFERS;
                         tn_jpeg->src = (uint8_t*) mPreviewBufs[current_snapshot];
                         tn_jpeg->src_size = mPreviewMemory->size / MAX_BUFFERS;
@@ -874,6 +892,8 @@ void AppCallbackNotifier::notifyFrame()
                         tn_jpeg->in_height = height;
                         tn_jpeg->out_width = tn_width;
                         tn_jpeg->out_height = tn_height;
+                        tn_jpeg->right_crop = 0;
+                        tn_jpeg->start_offset = 0;
                         tn_jpeg->format = CameraParameters::PIXEL_FORMAT_YUV420SP;;
                     }
 
@@ -887,6 +907,10 @@ void AppCallbackNotifier::notifyFrame()
                     encoder->run();
                     gEncoderQueue.add(frame->mBuffer, encoder);
                     encoder.clear();
+                    if (params != NULL)
+                      {
+                        mCameraHal->putParameters(params);
+                      }
                     }
                 else if ( ( CameraFrame::IMAGE_FRAME == frame->mFrameType ) &&
                              ( NULL != mCameraHal ) &&
@@ -1140,7 +1164,10 @@ void AppCallbackNotifier::eventCallback(CameraHalEvent* chEvt)
             {
             msg.command = AppCallbackNotifier::NOTIFIER_CMD_PROCESS_EVENT;
             msg.arg1 = event;
+            {
+            Mutex::Autolock lock(mLock);
             mEventQ.put(&msg);
+            }
             }
         else
             {
@@ -1150,6 +1177,16 @@ void AppCallbackNotifier::eventCallback(CameraHalEvent* chEvt)
         }
 
     LOG_FUNCTION_NAME_EXIT;
+}
+
+
+void AppCallbackNotifier::flushEventQueue()
+{
+
+    {
+    Mutex::Autolock lock(mLock);
+    mEventQ.clear();
+    }
 }
 
 
@@ -1169,7 +1206,7 @@ bool AppCallbackNotifier::processMessage()
       {
         case NotificationThread::NOTIFIER_EXIT:
           {
-            CAMHAL_LOGEA("Received NOTIFIER_EXIT command from Camera HAL");
+            CAMHAL_LOGI("Received NOTIFIER_EXIT command from Camera HAL");
             mNotifierState = AppCallbackNotifier::NOTIFIER_EXITED;
             ret = false;
             break;
@@ -1416,16 +1453,6 @@ void AppCallbackNotifier::setVideoRes(int width, int height)
   mVideoHeight = height;
 
   LOG_FUNCTION_NAME_EXIT;
-}
-
-int AppCallbackNotifier::setParameters(const CameraParameters& params)
-{
-    LOG_FUNCTION_NAME;
-
-    mParameters = params;
-
-    LOG_FUNCTION_NAME_EXIT;
-    return NO_ERROR;
 }
 
 status_t AppCallbackNotifier::stopPreviewCallbacks()

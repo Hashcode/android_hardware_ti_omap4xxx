@@ -181,6 +181,6 @@ IMG_buffer_format_public_t;
 
 
 /* FIXME: Stub for compile. Need this normally defined in overlay.h somewhere */
-#define HWC_EXTERNAL_DISPLAY_CONNECTED 0x00
+#define HWC_EXTERNAL_DISPLAY_CONNECTED = 0x00002000
 
 #endif /* HAL_PUBLIC_H */

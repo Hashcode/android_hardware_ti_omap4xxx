@@ -31,126 +31,115 @@
 #include <linux/omap_ion.h>
 #include "ion.h"
 
-int ion_open()
-{
-        int fd = open("/dev/ion", O_RDWR);
-        if (fd < 0)
-                LOGE("open /dev/ion failed!\n");
-        return fd;
+int ion_open() {
+    int fd = open("/dev/ion", O_RDWR);
+    if (fd < 0)
+        LOGE("open /dev/ion failed!\n");
+    return fd;
 }
 
-int ion_close(int fd)
-{
-        return close(fd);
+int ion_close(int fd) {
+    return close(fd);
 }
 
-static int ion_ioctl(int fd, int req, void *arg)
-{
-        int ret = ioctl(fd, req, arg);
-        if (ret < 0) {
-                LOGE("ioctl %d failed with code %d: %s\n", req,
-                       ret, strerror(errno));
-                return -errno;
-        }
+static int ion_ioctl(int fd, int req, void *arg) {
+    int ret = ioctl(fd, req, arg);
+    if (ret < 0) {
+        LOGE("ioctl %d failed with code %d: %s\n", req, ret, strerror(errno));
+        return -errno;
+    }
+    return ret;
+}
+
+int ion_alloc(int fd, size_t len, size_t align, unsigned int flags, struct ion_handle **handle) {
+    int ret;
+    struct ion_allocation_data data = {
+        .len = len,
+        .align = align,
+        .flags = flags,
+    };
+
+    ret = ion_ioctl(fd, ION_IOC_ALLOC, &data);
+    if (ret < 0)
         return ret;
+    *handle = data.handle;
+    return ret;
 }
 
-int ion_alloc(int fd, size_t len, size_t align, unsigned int flags,
-              struct ion_handle **handle)
-{
-        int ret;
-        struct ion_allocation_data data = {
-                .len = len,
-                .align = align,
-                .flags = flags,
-        };
+int ion_alloc_tiler(int fd, size_t w, size_t h, int fmt, unsigned int flags, struct ion_handle **handle, size_t *stride) {
+    int ret;
 
-        ret = ion_ioctl(fd, ION_IOC_ALLOC, &data);
-        if (ret < 0)
-                return ret;
-        *handle = data.handle;
+    struct omap_ion_tiler_alloc_data alloc_data = {
+        .w = w,
+        .h = h,
+        .fmt = fmt,
+        .flags = flags,
+    };
+
+    struct ion_custom_data custom_data = {
+        .cmd = OMAP_ION_TILER_ALLOC,
+        .arg = (unsigned long)(&alloc_data),
+    };
+
+    ret = ion_ioctl(fd, ION_IOC_CUSTOM, &custom_data);
+    if (ret < 0)
         return ret;
+    *stride = alloc_data.stride;
+    *handle = alloc_data.handle;
+    return ret;
 }
 
-int ion_alloc_tiler(int fd, size_t w, size_t h, int fmt, unsigned int flags,
-            struct ion_handle **handle, size_t *stride)
-{
-        int ret;
-        struct omap_ion_tiler_alloc_data alloc_data = {
-                .w = w,
-                .h = h,
-                .fmt = fmt,
-                .flags = flags,
-        };
-
-        struct ion_custom_data custom_data = {
-                .cmd = OMAP_ION_TILER_ALLOC,
-                .arg = (unsigned long)(&alloc_data),
-        };
-
-        ret = ion_ioctl(fd, ION_IOC_CUSTOM, &custom_data);
-        if (ret < 0)
-                return ret;
-        *stride = alloc_data.stride;
-        *handle = alloc_data.handle;
-        return ret;
-}
-
-int ion_free(int fd, struct ion_handle *handle)
-{
-        struct ion_handle_data data = {
-                .handle = handle,
-        };
-        return ion_ioctl(fd, ION_IOC_FREE, &data);
+int ion_free(int fd, struct ion_handle *handle) {
+    struct ion_handle_data data = {
+        .handle = handle,
+    };
+    return ion_ioctl(fd, ION_IOC_FREE, &data);
 }
 
 int ion_map(int fd, struct ion_handle *handle, size_t length, int prot,
-            int flags, off_t offset, unsigned char **ptr, int *map_fd)
-{
-        struct ion_fd_data data = {
-                .handle = handle,
-        };
-        int ret = ion_ioctl(fd, ION_IOC_MAP, &data);
-        if (ret < 0)
-                return ret;
-        *map_fd = data.fd;
-        if (*map_fd < 0) {
-                LOGE("map ioctl returned negative fd\n");
-                return -EINVAL;
-        }
-        *ptr = mmap(NULL, length, prot, flags, *map_fd, offset);
-        if (*ptr == MAP_FAILED) {
-                LOGE("mmap failed: %s\n", strerror(errno));
-                return -errno;
-        }
+            int flags, off_t offset, unsigned char **ptr, int *map_fd) {
+    struct ion_fd_data data = {
+        .handle = handle,
+    };
+    int ret = ion_ioctl(fd, ION_IOC_MAP, &data);
+    if (ret < 0)
         return ret;
+    *map_fd = data.fd;
+    if (*map_fd < 0) {
+        LOGE("map ioctl returned negative fd\n");
+        return -EINVAL;
+    }
+    *ptr = mmap(NULL, length, prot, flags, *map_fd, offset);
+    if (*ptr == MAP_FAILED) {
+        LOGE("mmap failed: %s\n", strerror(errno));
+        return -errno;
+    }
+    return ret;
 }
 
-int ion_share(int fd, struct ion_handle *handle, int *share_fd)
-{
-        int map_fd;
-        struct ion_fd_data data = {
-                .handle = handle,
-        };
-        int ret = ion_ioctl(fd, ION_IOC_SHARE, &data);
-        if (ret < 0)
-                return ret;
-        *share_fd = data.fd;
-        if (*share_fd < 0) {
-                LOGE("map ioctl returned negative fd\n");
-                return -EINVAL;
-        }
+int ion_share(int fd, struct ion_handle *handle, int *share_fd) {
+    int map_fd;
+    struct ion_fd_data data = {
+        .handle = handle,
+    };
+    int ret = ion_ioctl(fd, ION_IOC_SHARE, &data);
+    if (ret < 0)
         return ret;
+    *share_fd = data.fd;
+    if (*share_fd < 0) {
+        LOGE("map ioctl returned negative fd\n");
+        return -EINVAL;
+    }
+    return ret;
 }
 
-int ion_import(int fd, int share_fd, struct ion_handle **handle)
-{
-        struct ion_fd_data data = {
-                .fd = share_fd,
-        };
-        int ret = ion_ioctl(fd, ION_IOC_IMPORT, &data);
-        if (ret < 0)
-                return ret;
-        *handle = data.handle;
+int ion_import(int fd, int share_fd, struct ion_handle **handle) {
+    struct ion_fd_data data = {
+        .fd = share_fd,
+    };
+    int ret = ion_ioctl(fd, ION_IOC_IMPORT, &data);
+    if (ret < 0)
         return ret;
+    *handle = data.handle;
+    return ret;
 }

@@ -21,10 +21,6 @@
 *
 */
 
-#undef LOG_TAG
-
-#define LOG_TAG "CameraHAL"
-
 #include "CameraHal.h"
 #include "OMXCameraAdapter.h"
 #include "ErrorUtils.h"
@@ -50,6 +46,10 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
             {
             capMode = OMXCameraAdapter::HIGH_SPEED;
             }
+        else if (strcmp(valstr, (const char *) TICameraParameters::EXPOSURE_BRACKETING) == 0)
+            {
+            capMode = OMXCameraAdapter::HIGH_SPEED;
+            }
         else if (strcmp(valstr, (const char *) TICameraParameters::HIGH_QUALITY_MODE) == 0)
             {
             capMode = OMXCameraAdapter::HIGH_QUALITY;
@@ -69,7 +69,7 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         }
     else
         {
-        capMode = OMXCameraAdapter::HIGH_QUALITY_ZSL;
+        capMode = OMXCameraAdapter::HIGH_QUALITY;
 
         }
 
@@ -77,6 +77,7 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         {
         mCapMode = capMode;
         mOMXStateSwitch = true;
+        mPendingPreviewSettings |= SetCapMode;
         }
 
     CAMHAL_LOGDB("Capture Mode set %d", mCapMode);
@@ -200,11 +201,14 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         {
         mIPP = ipp;
         mOMXStateSwitch = true;
+        mPendingPreviewSettings |= SetLDC;
+        mPendingPreviewSettings |= SetNSF;
         }
 
     ///Set VNF Configuration
     bool vnfEnabled = false;
-    if ( params.getInt(TICameraParameters::KEY_VNF)  > 0 )
+    valstr = params.get(TICameraParameters::KEY_VNF);
+    if (valstr && strcmp(valstr, CameraParameters::TRUE) == 0)
         {
         CAMHAL_LOGDA("VNF Enabled");
         vnfEnabled = true;
@@ -219,6 +223,7 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         {
         mVnfEnabled = vnfEnabled;
         mOMXStateSwitch = true;
+        mPendingPreviewSettings |= SetVNF;
         }
 
     ///Set VSTAB Configuration
@@ -238,6 +243,7 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         {
         mVstabEnabled = vstabEnabled;
         mOMXStateSwitch = true;
+        mPendingPreviewSettings |= SetVSTAB;
         }
 
     //A work-around for a failing call to OMX flush buffers
@@ -248,67 +254,19 @@ status_t OMXCameraAdapter::setParametersAlgo(const CameraParameters &params,
         }
 
     //Set Auto Convergence Mode
-    valstr = params.get((const char *) TICameraParameters::KEY_AUTOCONVERGENCE);
+    valstr = params.get((const char *) TICameraParameters::KEY_AUTOCONVERGENCE_MODE);
     if ( valstr != NULL )
         {
-        // Set ManualConvergence default value
-        OMX_S32 manualconvergence = -30;
-        if ( strcmp (valstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_DISABLE) == 0 )
-            {
-            setAutoConvergence(OMX_TI_AutoConvergenceModeDisable, manualconvergence);
-            }
-        else if ( strcmp (valstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_FRAME) == 0 )
-                {
-                setAutoConvergence(OMX_TI_AutoConvergenceModeFrame, manualconvergence);
-                }
-        else if ( strcmp (valstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_CENTER) == 0 )
-                {
-                setAutoConvergence(OMX_TI_AutoConvergenceModeCenter, manualconvergence);
-                }
-        else if ( strcmp (valstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_FFT) == 0 )
-                {
-                setAutoConvergence(OMX_TI_AutoConvergenceModeFocusFaceTouch, manualconvergence);
-                }
-        else if ( strcmp (valstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_MANUAL) == 0 )
-                {
-                manualconvergence = (OMX_S32)params.getInt(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES);
-                setAutoConvergence(OMX_TI_AutoConvergenceModeManual, manualconvergence);
-                }
-        CAMHAL_LOGVB("AutoConvergenceMode %s, value = %d", valstr, (int) manualconvergence);
+            setAutoConvergence(valstr, params);
+            CAMHAL_LOGDB("AutoConvergenceMode %s", valstr);
         }
 
-    LOG_FUNCTION_NAME_EXIT;
-
-    return ret;
-}
-
-// Get AutoConvergence
-status_t OMXCameraAdapter::getAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE *pACMode,
-                                              OMX_S32 *pManualConverence)
-{
-    status_t ret = NO_ERROR;
-    OMX_ERRORTYPE eError = OMX_ErrorNone;
-    OMX_TI_CONFIG_CONVERGENCETYPE ACParams;
-
-    ACParams.nSize = sizeof(OMX_TI_CONFIG_CONVERGENCETYPE);
-    ACParams.nVersion = mLocalVersionParam;
-    ACParams.nPortIndex = OMX_ALL;
-
-    LOG_FUNCTION_NAME;
-
-    eError =  OMX_GetConfig(mCameraAdapterParameters.mHandleComp,
-                            (OMX_INDEXTYPE)OMX_TI_IndexConfigAutoConvergence,
-                            &ACParams);
-    if ( eError != OMX_ErrorNone )
+    //Set Mechanical Misalignment Correction
+    valstr = params.get((const char *) TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION);
+    if ( valstr != NULL )
         {
-        CAMHAL_LOGEB("Error while getting AutoConvergence 0x%x", eError);
-        ret = -EINVAL;
-        }
-    else
-        {
-        *pManualConverence = ACParams.nManualConverence;
-        *pACMode = ACParams.eACMode;
-        CAMHAL_LOGDA("AutoConvergence got successfully");
+        setMechanicalMisalignmentCorrection(valstr);
+        CAMHAL_LOGDB("Mechanical Misalignment Correction %s", valstr);
         }
 
     LOG_FUNCTION_NAME_EXIT;
@@ -317,31 +275,113 @@ status_t OMXCameraAdapter::getAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE *pA
 }
 
 // Set AutoConvergence
-status_t OMXCameraAdapter::setAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE pACMode,
-                                              OMX_S32 pManualConverence)
+status_t OMXCameraAdapter::setAutoConvergence(const char *pValstr, const CameraParameters &params)
 {
     status_t ret = NO_ERROR;
     OMX_ERRORTYPE eError = OMX_ErrorNone;
     OMX_TI_CONFIG_CONVERGENCETYPE ACParams;
+    const char *str = NULL;
+    Vector< sp<CameraArea> > tempAreas;
+    OMX_S32 manualconvergence = 0;
 
     LOG_FUNCTION_NAME;
 
-    ACParams.nSize = sizeof(OMX_TI_CONFIG_CONVERGENCETYPE);
+    ACParams.nSize = (OMX_U32)sizeof(OMX_TI_CONFIG_CONVERGENCETYPE);
     ACParams.nVersion = mLocalVersionParam;
     ACParams.nPortIndex = OMX_ALL;
-    ACParams.nManualConverence = pManualConverence;
-    ACParams.eACMode = pACMode;
-    eError =  OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
-                            (OMX_INDEXTYPE)OMX_TI_IndexConfigAutoConvergence,
-                            &ACParams);
-    if ( eError != OMX_ErrorNone )
+
+    OMX_GetConfig(mCameraAdapterParameters.mHandleComp, (OMX_INDEXTYPE)OMX_TI_IndexConfigAutoConvergence, &ACParams);
+
+    OMXCameraPortParameters * mPreviewData;
+    mPreviewData = &mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex];
+
+
+    if ( strcmp (pValstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_DISABLE) == 0 )
         {
-        CAMHAL_LOGEB("Error while setting AutoConvergence 0x%x", eError);
-        ret = -EINVAL;
+        ACParams.eACMode = OMX_TI_AutoConvergenceModeDisable;
+        }
+    else if ( strcmp (pValstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_FRAME) == 0 )
+        {
+        ACParams.eACMode = OMX_TI_AutoConvergenceModeFrame;
+        }
+    else if ( strcmp (pValstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_CENTER) == 0 )
+        {
+        ACParams.eACMode = OMX_TI_AutoConvergenceModeCenter;
+        }
+    else if ( strcmp (pValstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_TOUCH) == 0 )
+        {
+        ACParams.eACMode = OMX_TI_AutoConvergenceModeFocusFaceTouch;
+
+        Mutex::Autolock lock(mTouchAreasLock);
+
+        str = params.get((const char *)CameraParameters::KEY_METERING_AREAS);
+
+        if ( NULL != str ) {
+            ret = CameraArea::parseAreas(str, ( strlen(str) + 1 ), tempAreas);
+        }
+        else {
+            CAMHAL_LOGEB("Touch areas not received in %s", CameraParameters::KEY_METERING_AREAS);
+            ret = -EINVAL;
+        }
+
+        if ( (NO_ERROR == ret) && CameraArea::areAreasDifferent(mTouchAreas, tempAreas) )
+            {
+            mTouchAreas.clear();
+            mTouchAreas = tempAreas;
+            if (1 == mTouchAreas.size())
+                {
+                // transform the coordinates to 3A-type coordinates
+                mTouchAreas.itemAt(0)->transfrom((size_t)mPreviewData->mWidth,
+                                                 (size_t)mPreviewData->mHeight,
+                                                 (size_t&) ACParams.nACProcWinStartY,
+                                                 (size_t&) ACParams.nACProcWinStartX,
+                                                 (size_t&) ACParams.nACProcWinWidth,
+                                                 (size_t&) ACParams.nACProcWinHeight);
+                }
+            }
+        }
+    else if ( strcmp (pValstr, (const char *) TICameraParameters::AUTOCONVERGENCE_MODE_MANUAL) == 0 )
+        {
+        str = params.get(TICameraParameters::KEY_MANUAL_CONVERGENCE);
+        if ( str != NULL )
+            {
+            manualconvergence = (OMX_S32)params.getInt(TICameraParameters::KEY_MANUAL_CONVERGENCE);
+            }
+
+        ACParams.eACMode = OMX_TI_AutoConvergenceModeManual;
         }
     else
         {
-        CAMHAL_LOGDA("AutoConvergence applied successfully");
+        CAMHAL_LOGEB("Wrong AutoConvergence mode %s", pValstr);
+        ret = -EINVAL;
+        }
+
+    if (ret != -EINVAL)
+        {
+        ACParams.nManualConverence = manualconvergence;
+        CAMHAL_LOGDB("nSize %d", (int)ACParams.nSize);
+        CAMHAL_LOGDB("nPortIndex %d", (int)ACParams.nPortIndex);
+        CAMHAL_LOGDB("nManualConverence %d", (int)ACParams.nManualConverence);
+        CAMHAL_LOGDB("eACMode %d", (int)ACParams.eACMode);
+        CAMHAL_LOGDB("nACProcWinStartX %d", (int)ACParams.nACProcWinStartX);
+        CAMHAL_LOGDB("nACProcWinStartY %d", (int)ACParams.nACProcWinStartY);
+        CAMHAL_LOGDB("nACProcWinWidth %d", (int)ACParams.nACProcWinWidth);
+        CAMHAL_LOGDB("nACProcWinHeight %d", (int)ACParams.nACProcWinHeight);
+        CAMHAL_LOGDB("bACStatus %d", (int)ACParams.bACStatus);
+
+        eError =  OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
+                                (OMX_INDEXTYPE)OMX_TI_IndexConfigAutoConvergence,
+                                &ACParams);
+
+        if ( eError != OMX_ErrorNone )
+            {
+            CAMHAL_LOGEB("Error while setting AutoConvergence 0x%x", eError);
+            ret = -EINVAL;
+            }
+        else
+            {
+            CAMHAL_LOGDA("AutoConvergence applied successfully");
+            }
         }
 
     LOG_FUNCTION_NAME_EXIT;
@@ -599,14 +639,9 @@ status_t OMXCameraAdapter::setCaptureMode(OMXCameraAdapter::CaptureMode mode)
     status_t ret = NO_ERROR;
     OMX_ERRORTYPE eError = OMX_ErrorNone;
     OMX_CONFIG_CAMOPERATINGMODETYPE camMode;
-    OMX_TI_PARAM_ZSLHISTORYLENTYPE zslHistoryLen;
     OMX_CONFIG_BOOLEANTYPE bCAC;
 
     LOG_FUNCTION_NAME;
-
-    //ZSL have 4 buffers history by default
-    OMX_INIT_STRUCT_PTR (&zslHistoryLen, OMX_TI_PARAM_ZSLHISTORYLENTYPE);
-    zslHistoryLen.nHistoryLen = 4;
 
     //CAC is disabled by default
     OMX_INIT_STRUCT_PTR (&bCAC, OMX_CONFIG_BOOLEANTYPE);
@@ -636,11 +671,6 @@ status_t OMXCameraAdapter::setCaptureMode(OMXCameraAdapter::CaptureMode mode)
             const char* valstr = NULL;
             CAMHAL_LOGDA("Camera mode: HIGH QUALITY_ZSL");
             camMode.eCamOperatingMode = OMX_TI_CaptureImageProfileZeroShutterLag;
-
-            valstr = mParams.get(TICameraParameters::KEY_RECORDING_HINT);
-            if (!valstr || (valstr && (strcmp(valstr, "false")))) {
-                zslHistoryLen.nHistoryLen = 5;
-            }
             }
         else if( OMXCameraAdapter::VIDEO_MODE == mode )
             {
@@ -651,25 +681,6 @@ status_t OMXCameraAdapter::setCaptureMode(OMXCameraAdapter::CaptureMode mode)
             {
             CAMHAL_LOGEA("Camera mode: INVALID mode passed!");
             return BAD_VALUE;
-            }
-
-        if( NO_ERROR == ret )
-            {
-            eError =  OMX_SetParameter(mCameraAdapterParameters.mHandleComp,
-                                       ( OMX_INDEXTYPE ) OMX_TI_IndexParamZslHistoryLen,
-                                       &zslHistoryLen);
-            if ( OMX_ErrorNone != eError )
-                {
-                CAMHAL_LOGEB("Error while configuring ZSL History len 0x%x", eError);
-                // Don't return status for now
-                // as high history values might lead
-                // to errors on some platforms.
-                // ret = ErrorUtils::omxToAndroidError(eError);
-                }
-            else
-                {
-                CAMHAL_LOGDA("ZSL History len configured successfully");
-                }
             }
 
         if( NO_ERROR == ret )
@@ -1051,76 +1062,53 @@ status_t OMXCameraAdapter::setSensorOrientation(unsigned int degree)
     OMXCameraPortParameters *mPreviewData = &mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex];
 
     LOG_FUNCTION_NAME;
-    if ( OMX_StateInvalid == mComponentState )
-        {
+    if ( OMX_StateInvalid == mComponentState ) {
         CAMHAL_LOGEA("OMX component is in invalid state");
         ret = -1;
-        }
+    }
 
     /* Set Temproary Port resolution.
     * For resolution with height > 1008,resolution cannot be set without configuring orientation.
     * So we first set a temp resolution. We have used VGA
     */
-    tmpHeight = mPreviewData->mHeight;
-    tmpWidth = mPreviewData->mWidth;
-    mPreviewData->mWidth = 640;
-    mPreviewData->mHeight = 480;
-    ret = setFormat(OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW, *mPreviewData);
-    if ( ret != NO_ERROR )
-        {
-        CAMHAL_LOGEB("setFormat() failed %d", ret);
+    if ( mPreviewData->mHeight >= 1008 ) {
+        tmpHeight = mPreviewData->mHeight;
+        tmpWidth = mPreviewData->mWidth;
+        mPreviewData->mWidth = 640;
+        mPreviewData->mHeight = 480;
+        ret = setFormat(OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW, *mPreviewData);
+        if ( ret != NO_ERROR ) {
+            CAMHAL_LOGEB("setFormat() failed %d", ret);
         }
+        mPreviewData->mWidth = tmpWidth;
+        mPreviewData->mHeight = tmpHeight;
+    }
 
     /* Now set Required Orientation*/
-    if ( NO_ERROR == ret )
-        {
+    if ( NO_ERROR == ret ) {
         OMX_INIT_STRUCT(sensorOrientation, OMX_CONFIG_ROTATIONTYPE);
-        sensorOrientation.nPortIndex = mCameraAdapterParameters.mPrevPortIndex;
-        eError = OMX_GetConfig(mCameraAdapterParameters.mHandleComp,
-                               OMX_IndexConfigCommonRotate,
-                               &sensorOrientation);
-        if ( OMX_ErrorNone != eError )
-            {
-            CAMHAL_LOGEB("Error while Reading Sensor Orientation :  0x%x", eError);
-            }
-        CAMHAL_LOGVB(" Currently Sensor Orientation is set to : %d",
-                     ( unsigned int ) sensorOrientation.nRotation);
         sensorOrientation.nPortIndex = mCameraAdapterParameters.mPrevPortIndex;
         sensorOrientation.nRotation = degree;
         eError = OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
                                OMX_IndexConfigCommonRotate,
                                &sensorOrientation);
-        if ( OMX_ErrorNone != eError )
-            {
+        if ( OMX_ErrorNone != eError ) {
             CAMHAL_LOGEB("Error while configuring rotation 0x%x", eError);
-            }
-        CAMHAL_LOGVA(" Read the Parameters that are set");
-        eError = OMX_GetConfig(mCameraAdapterParameters.mHandleComp,
-                               OMX_IndexConfigCommonRotate,
-                               &sensorOrientation);
-        if ( OMX_ErrorNone != eError )
-            {
-            CAMHAL_LOGEB("Error while Reading Sensor Orientation :  0x%x", eError);
-            }
+        }
         CAMHAL_LOGVB(" Currently Sensor Orientation is set to : %d",
                      ( unsigned int ) sensorOrientation.nRotation);
         CAMHAL_LOGVB(" Sensor Configured for Port : %d",
                      ( unsigned int ) sensorOrientation.nPortIndex);
-        }
+    }
 
     /* Now set the required resolution as requested */
-
-    mPreviewData->mWidth = tmpWidth;
-    mPreviewData->mHeight = tmpHeight;
-    if ( NO_ERROR == ret )
-        {
+    if ( NO_ERROR == ret ) {
         ret = setFormat (mCameraAdapterParameters.mPrevPortIndex,
                          mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex]);
-        if ( NO_ERROR != ret )
-            {
+        if ( NO_ERROR != ret ) {
             CAMHAL_LOGEB("setFormat() failed %d", ret);
-            }
         }
+    }
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -1172,5 +1160,31 @@ status_t OMXCameraAdapter::setVFramerate(OMX_U32 minFrameRate, OMX_U32 maxFrameR
 
     return ret;
  }
+
+status_t OMXCameraAdapter::setMechanicalMisalignmentCorrection(const char *mode)
+{
+    status_t ret = NO_ERROR;
+    OMX_ERRORTYPE eError = OMX_ErrorNone;
+    OMX_TI_CONFIG_MM mm;
+
+    LOG_FUNCTION_NAME;
+
+    mm.nVersion = mLocalVersionParam;
+    mm.nSize = sizeof(OMX_TI_CONFIG_MM);
+    mm.bMM = (OMX_BOOL)getLUTvalue_HALtoOMX(mode, mMechanicalMisalignmentCorrectionLUT);
+
+    eError = OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
+                           (OMX_INDEXTYPE)OMX_TI_IndexConfigMechanicalMisalignment,
+                           &mm);
+
+    if(OMX_ErrorNone != eError) {
+        CAMHAL_LOGEB("Error while enabling mechanical misalignment correction. error = 0x%x", eError);
+        ret = -1;
+    }
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return ret;
+}
 
 };

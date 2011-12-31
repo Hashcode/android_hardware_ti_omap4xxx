@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-
-
-
-#define LOG_TAG "CameraHAL"
 #include <utils/Log.h>
 
 #include <string.h>
@@ -32,6 +28,8 @@ const char TICameraParameters::HIGH_PERFORMANCE_MODE[] = "high-performance";
 const char TICameraParameters::HIGH_QUALITY_MODE[] = "high-quality";
 const char TICameraParameters::HIGH_QUALITY_ZSL_MODE[] = "high-quality-zsl";
 const char TICameraParameters::VIDEO_MODE[] = "video-mode";
+const char TICameraParameters::EXPOSURE_BRACKETING[] = "exposure-bracketing";
+const char TICameraParameters::TEMP_BRACKETING[] = "temporal-bracketing";
 
 // TI extensions to standard android Parameters
 const char TICameraParameters::KEY_SUPPORTED_CAMERAS[] = "camera-indexes";
@@ -40,7 +38,9 @@ const char TICameraParameters::KEY_SHUTTER_ENABLE[] = "shutter-enable";
 const char TICameraParameters::KEY_CAMERA_NAME[] = "camera-name";
 const char TICameraParameters::KEY_BURST[] = "burst-capture";
 const char TICameraParameters::KEY_CAP_MODE[] = "mode";
+const char TICameraParameters::KEY_CAP_MODE_VALUES[] = "mode-values";
 const char TICameraParameters::KEY_VNF[] = "vnf";
+const char TICameraParameters::KEY_VNF_SUPPORTED[] = "vnf-supported";
 const char TICameraParameters::KEY_SATURATION[] = "saturation";
 const char TICameraParameters::KEY_BRIGHTNESS[] = "brightness";
 const char TICameraParameters::KEY_EXPOSURE_MODE[] = "exposure";
@@ -59,7 +59,6 @@ const char TICameraParameters::KEY_EXP_BRACKETING_RANGE[] = "exp-bracketing-rang
 const char TICameraParameters::KEY_TEMP_BRACKETING[] = "temporal-bracketing";
 const char TICameraParameters::KEY_TEMP_BRACKETING_RANGE_POS[] = "temporal-bracketing-range-positive";
 const char TICameraParameters::KEY_TEMP_BRACKETING_RANGE_NEG[] = "temporal-bracketing-range-negative";
-const char TICameraParameters::KEY_S3D_SUPPORTED[] = "s3d-supported";
 const char TICameraParameters::KEY_MEASUREMENT_ENABLE[] = "measurement";
 const char TICameraParameters::KEY_GBCE[] = "gbce";
 const char TICameraParameters::KEY_GLBCE[] = "glbce";
@@ -70,6 +69,10 @@ const char TICameraParameters::KEY_MINFRAMERATE[] = "min-framerate";
 const char TICameraParameters::KEY_MAXFRAMERATE[] = "max-framerate";
 const char TICameraParameters::KEY_RECORDING_HINT[] = "internal-recording-hint";
 const char TICameraParameters::KEY_AUTO_FOCUS_LOCK[] = "auto-focus-lock";
+
+const char TICameraParameters::RAW_WIDTH[] = "raw-width";
+const char TICameraParameters::RAW_HEIGHT[] = "raw-height";
+const char TICameraParameters::KEY_FILENAME_TIMESTAMP[] = "captured-filename";
 
 //TI extensions for enabling/disabling GLBCE
 const char TICameraParameters::GLBCE_ENABLE[] = "enable";
@@ -87,14 +90,25 @@ const char TICameraParameters::MEASUREMENT_DISABLE[] = "disable";
 const char TICameraParameters::ZOOM_SUPPORTED[] = "true";
 const char TICameraParameters::ZOOM_UNSUPPORTED[] = "false";
 
-// TI extensions for 2D Preview in Stereo Mode
-const char TICameraParameters::KEY_S3D2D_PREVIEW[] = "s3d2d-preview";
-const char TICameraParameters::KEY_S3D2D_PREVIEW_MODE[] = "s3d2d-preview-values";
+// TI extensions for Stereo Mode
+const char TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT[] = "s3d-prv-frame-layout";
+const char TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT_VALUES[] = "s3d-prv-frame-layout-values";
+const char TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT[] = "s3d-cap-frame-layout";
+const char TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT_VALUES[] = "s3d-cap-frame-layout-values";
+
+//TI extentions fo 3D resolutions
+const char TICameraParameters::KEY_SUPPORTED_PICTURE_TOPBOTTOM_SIZES[] = "supported-picture-topbottom-size-values";
+const char TICameraParameters::KEY_SUPPORTED_PICTURE_SIDEBYSIDE_SIZES[] = "supported-picture-sidebyside-size-values";
+const char TICameraParameters::KEY_SUPPORTED_PREVIEW_TOPBOTTOM_SIZES[] = "supported-preview-topbottom-size-values";
+const char TICameraParameters::KEY_SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES[] = "supported-preview-sidebyside-size-values";
 
 //TI extensions for SAC/SMC
-const char TICameraParameters::KEY_AUTOCONVERGENCE[] = "auto-convergence";
 const char TICameraParameters::KEY_AUTOCONVERGENCE_MODE[] = "auto-convergence-mode";
-const char TICameraParameters::KEY_MANUALCONVERGENCE_VALUES[] = "manual-convergence-values";
+const char TICameraParameters::KEY_AUTOCONVERGENCE_MODE_VALUES[] = "auto-convergence-mode-values";
+const char TICameraParameters::KEY_MANUAL_CONVERGENCE[] = "manual-convergence";
+const char TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_MIN[] = "supported-manual-convergence-min";
+const char TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_MAX[] = "supported-manual-convergence-max";
+const char TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_STEP[] = "supported-manual-convergence-step";
 
 //TI extensions for setting EXIF tags
 const char TICameraParameters::KEY_EXIF_MODEL[] = "exif-model";
@@ -120,11 +134,14 @@ const char TICameraParameters::IPP_NSF[] = "nsf";
 const char TICameraParameters::IPP_NONE[] = "off";
 
 // TI extensions to standard android pixel formats
+const char TICameraParameters::PIXEL_FORMAT_UNUSED[] = "unused";
+const char TICameraParameters::PIXEL_FORMAT_JPEG[] = "jpeg";
 const char TICameraParameters::PIXEL_FORMAT_RAW[] = "raw";
 const char TICameraParameters::PIXEL_FORMAT_JPS[] = "jps";
 const char TICameraParameters::PIXEL_FORMAT_MPO[] = "mpo";
 const char TICameraParameters::PIXEL_FORMAT_RAW_JPEG[] = "raw+jpeg";
 const char TICameraParameters::PIXEL_FORMAT_RAW_MPO[] = "raw+mpo";
+const char TICameraParameters::PIXEL_FORMAT_RAW_JPS[] = "raw+jps";
 
 // TI extensions to standard android scene mode settings
 const char TICameraParameters::SCENE_MODE_SPORT[] = "sport";
@@ -149,6 +166,7 @@ const char TICameraParameters::WHITE_BALANCE_FACE[] = "face-priority";
 const char TICameraParameters::FOCUS_MODE_PORTRAIT[] = "portrait";
 const char TICameraParameters::FOCUS_MODE_EXTENDED[] = "extended";
 const char TICameraParameters::FOCUS_MODE_FACE[] = "face-priority";
+const char TICameraParameters::FOCUS_MODE_OFF[] = "off";
 
 //  TI extensions to add  values for effect settings.
 const char TICameraParameters::EFFECT_NATURAL[] = "natural";
@@ -179,12 +197,19 @@ const char TICameraParameters::ISO_MODE_1000[] = "1000";
 const char TICameraParameters::ISO_MODE_1200[] = "1200";
 const char TICameraParameters::ISO_MODE_1600[] = "1600";
 
+//TI extensions for stereo frame layouts
+const char TICameraParameters::S3D_NONE[] = "none";
+const char TICameraParameters::S3D_TB_FULL[] = "tb-full";
+const char TICameraParameters::S3D_SS_FULL[] = "ss-full";
+const char TICameraParameters::S3D_TB_SUBSAMPLED[] = "tb-subsampled";
+const char TICameraParameters::S3D_SS_SUBSAMPLED[] = "ss-subsampled";
+
 //  TI extensions to add auto convergence values
-const char TICameraParameters::AUTOCONVERGENCE_MODE_DISABLE[] = "mode-disable";
-const char TICameraParameters::AUTOCONVERGENCE_MODE_FRAME[] = "mode-frame";
-const char TICameraParameters::AUTOCONVERGENCE_MODE_CENTER[] = "mode-center";
-const char TICameraParameters::AUTOCONVERGENCE_MODE_FFT[] = "mode-fft";
-const char TICameraParameters::AUTOCONVERGENCE_MODE_MANUAL[] = "mode-manual";
+const char TICameraParameters::AUTOCONVERGENCE_MODE_DISABLE[] = "disable";
+const char TICameraParameters::AUTOCONVERGENCE_MODE_FRAME[] = "frame";
+const char TICameraParameters::AUTOCONVERGENCE_MODE_CENTER[] = "center";
+const char TICameraParameters::AUTOCONVERGENCE_MODE_TOUCH[] = "touch";
+const char TICameraParameters::AUTOCONVERGENCE_MODE_MANUAL[] = "manual";
 
 //TI values for camera direction
 const char TICameraParameters::FACING_FRONT[]="front";
@@ -198,5 +223,16 @@ const char TICameraParameters::ORIENTATION_SENSOR_NONE[] = "0";
 const char TICameraParameters::ORIENTATION_SENSOR_90[] = "90";
 const char TICameraParameters::ORIENTATION_SENSOR_180[] = "180";
 const char TICameraParameters::ORIENTATION_SENSOR_270[] = "270";
+
+const char TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION[] = "mechanical-misalignment-correction";
+const char TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION_VALUES[] = "mechanical-misalignment-correction-values";
+
+const char TICameraParameters::MECHANICAL_MISALIGNMENT_CORRECTION_ENABLE[] = "enable";
+const char TICameraParameters::MECHANICAL_MISALIGNMENT_CORRECTION_DISABLE[] = "disable";
+
+//TI extensions for video snapshot
+const char TICameraParameters::VIDEO_SNAPSHOT_SUPPORTED[] = "true";
+const char TICameraParameters::VIDEO_SNAPSHOT_UNSUPPORTED[] = "false";
+
 };
 

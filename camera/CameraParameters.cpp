@@ -29,13 +29,17 @@ namespace android {
 const char CameraProperties::INVALID[]="prop-invalid-key";
 const char CameraProperties::CAMERA_NAME[]="prop-camera-name";
 const char CameraProperties::CAMERA_SENSOR_INDEX[]="prop-sensor-index";
+const char CameraProperties::CAMERA_SENSOR_ID[] = "prop-sensor-id";
 const char CameraProperties::ORIENTATION_INDEX[]="prop-orientation";
 const char CameraProperties::FACING_INDEX[]="prop-facing";
-const char CameraProperties::S3D_SUPPORTED[]="prop-s3d-supported";
 const char CameraProperties::SUPPORTED_PREVIEW_SIZES[] = "prop-preview-size-values";
+const char CameraProperties::SUPPORTED_PREVIEW_TOPBOTTOM_SIZES[] = "prop-preview-topbottom-size-values";
+const char CameraProperties::SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES[] = "prop-preview-sidebyside-size-values";
 const char CameraProperties::SUPPORTED_PREVIEW_FORMATS[] = "prop-preview-format-values";
 const char CameraProperties::SUPPORTED_PREVIEW_FRAME_RATES[] = "prop-preview-frame-rate-values";
 const char CameraProperties::SUPPORTED_PICTURE_SIZES[] = "prop-picture-size-values";
+const char CameraProperties::SUPPORTED_PICTURE_TOPBOTTOM_SIZES[] = "prop-picture-topbottom-size-values";
+const char CameraProperties::SUPPORTED_PICTURE_SIDEBYSIDE_SIZES[] = "prop-picture-sidebyside-size-values";
 const char CameraProperties::SUPPORTED_PICTURE_FORMATS[] = "prop-picture-format-values";
 const char CameraProperties::SUPPORTED_THUMBNAIL_SIZES[] = "prop-jpeg-thumbnail-size-values";
 const char CameraProperties::SUPPORTED_WHITE_BALANCE[] = "prop-whitebalance-values";
@@ -79,13 +83,20 @@ const char CameraProperties::SATURATION[] = "prop-saturation-default";
 const char CameraProperties::SHARPNESS[] = "prop-sharpness-default";
 const char CameraProperties::IPP[] = "prop-ipp-default";
 const char CameraProperties::GBCE[] = "prop-gbce-default";
-const char CameraProperties::S3D2D_PREVIEW[] = "prop-s3d2d-preview";
-const char CameraProperties::S3D2D_PREVIEW_MODES[] = "prop-s3d2d-preview-values";
-const char CameraProperties::AUTOCONVERGENCE[] = "prop-auto-convergence";
+const char CameraProperties::S3D_PRV_FRAME_LAYOUT[] = "prop-s3d-prv-frame-layout";
+const char CameraProperties::S3D_PRV_FRAME_LAYOUT_VALUES[] = "prop-s3d-prv-frame-layout-values";
+const char CameraProperties::S3D_CAP_FRAME_LAYOUT[] = "prop-s3d-cap-frame-layout";
+const char CameraProperties::S3D_CAP_FRAME_LAYOUT_VALUES[] = "prop-s3d-cap-frame-layout-values";
 const char CameraProperties::AUTOCONVERGENCE_MODE[] = "prop-auto-convergence-mode";
-const char CameraProperties::MANUALCONVERGENCE_VALUES[] = "prop-manual-convergence-values";
+const char CameraProperties::AUTOCONVERGENCE_MODE_VALUES[] = "prop-auto-convergence-mode-values";
+const char CameraProperties::MANUAL_CONVERGENCE[] = "prop-manual-convergence";
+const char CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_MIN[] = "prop-supported-manual-convergence-min";
+const char CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_MAX[] = "prop-supported-manual-convergence-max";
+const char CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_STEP[] = "prop-supported-manual-convergence-step";
 const char CameraProperties::VSTAB[] = "prop-vstab-default";
 const char CameraProperties::VSTAB_SUPPORTED[] = "prop-vstab-supported";
+const char CameraProperties::VNF[] = "prop-vnf-default";
+const char CameraProperties::VNF_SUPPORTED[] = "prop-vnf-supported";
 const char CameraProperties::REVISION[] = "prop-revision";
 const char CameraProperties::FOCAL_LENGTH[] = "prop-focal-length";
 const char CameraProperties::HOR_ANGLE[] = "prop-horizontal-angle";
@@ -112,7 +123,9 @@ const char CameraProperties::VIDEO_SNAPSHOT_SUPPORTED[] = "prop-video-snapshot-s
 const char CameraProperties::VIDEO_SIZE[] = "video-size";
 const char CameraProperties::SUPPORTED_VIDEO_SIZES[] = "video-size-values";
 const char CameraProperties::PREFERRED_PREVIEW_SIZE_FOR_VIDEO[] = "preferred-preview-size-for-video";
-
+const char CameraProperties::MECHANICAL_MISALIGNMENT_CORRECTION[] = "prop-mechanical-misalignment-correction";
+const char CameraProperties::MECHANICAL_MISALIGNMENT_CORRECTION_VALUES[] = "prop-mechanical-misalignment-correction-values";
+const char CameraProperties::CAP_MODE_VALUES[] = "prop-mode-values";
 
 const char CameraProperties::DEFAULT_VALUE[] = "";
 
@@ -124,7 +137,7 @@ int CameraProperties::getProperties(int cameraIndex, CameraProperties::Propertie
 {
     LOG_FUNCTION_NAME;
 
-    if((unsigned int)cameraIndex >= mCamerasSupported)
+    if(cameraIndex >= mCamerasSupported)
     {
         LOG_FUNCTION_NAME_EXIT;
         return -EINVAL;
@@ -159,6 +172,15 @@ const char* CameraProperties::Properties::get(const char * prop)
 {
     String8 value = mProperties->valueFor(String8(prop));
     return value.string();
+}
+
+int CameraProperties::Properties::getInt(const char * prop)
+{
+    String8 value = mProperties->valueFor(String8(prop));
+    if (value.isEmpty()) {
+        return -1;
+    }
+    return strtol(value, 0, 0);
 }
 
 void CameraProperties::Properties::dump()

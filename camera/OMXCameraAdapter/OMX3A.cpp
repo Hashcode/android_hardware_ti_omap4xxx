@@ -21,10 +21,6 @@
 *
 */
 
-#undef LOG_TAG
-
-#define LOG_TAG "CameraHAL"
-
 #include "CameraHal.h"
 #include "OMXCameraAdapter.h"
 #include "ErrorUtils.h"
@@ -37,6 +33,8 @@
 #define FALSE "false"
 
 #define METERING_AREAS_RANGE 0xFF
+
+static const char PARAM_SEP[] = ",";
 
 namespace android {
 const SceneModesEntry* OMXCameraAdapter::getSceneModeEntry(const char* name,
@@ -273,7 +271,7 @@ status_t OMXCameraAdapter::setParameters3A(const CameraParameters &params,
         OMX_BOOL lock = OMX_FALSE;
         mUserSetExpLock = OMX_FALSE;
         str = params.get(CameraParameters::KEY_AUTO_EXPOSURE_LOCK);
-        if ( (strcmp(str, "true")) == 0)
+        if (str && ((strcmp(str, "true")) == 0))
           {
             CAMHAL_LOGVA("Locking Exposure");
             lock = OMX_TRUE;
@@ -298,7 +296,7 @@ status_t OMXCameraAdapter::setParameters3A(const CameraParameters &params,
         OMX_BOOL lock = OMX_FALSE;
         mUserSetWbLock = OMX_FALSE;
         str = params.get(CameraParameters::KEY_AUTO_WHITEBALANCE_LOCK);
-        if ( (strcmp(str, "true")) == 0)
+        if (str && ((strcmp(str, "true")) == 0))
           {
             CAMHAL_LOGVA("Locking WhiteBalance");
             lock = OMX_TRUE;
@@ -384,63 +382,23 @@ const char* OMXCameraAdapter::getLUTvalue_OMXtoHAL(int OMXValue, LUTtype LUT)
     return NULL;
 }
 
-status_t OMXCameraAdapter::apply3ADefaults(Gen3A_settings &Gen3A)
+int OMXCameraAdapter::getMultipleLUTvalue_OMXtoHAL(int OMXValue, LUTtype LUT, char * supported)
 {
-    status_t ret = NO_ERROR;
+    int num = 0;
+    int remaining_size;
+    int LUTsize = LUT.size;
+    for(int i = 0; i < LUTsize; i++)
+        if( LUT.Table[i].omxDefinition == OMXValue )
+        {
+            num++;
+            if (supported[0] != '\0') {
+                strncat(supported, PARAM_SEP, 1);
+            }
+            remaining_size = ((((int)MAX_PROP_VALUE_LENGTH - 1 - (int)strlen(supported)) < 0) ? 0 : (MAX_PROP_VALUE_LENGTH - 1 - strlen(supported)));
+            strncat(supported, LUT.Table[i].userDefinition, remaining_size);
+        }
 
-    LOG_FUNCTION_NAME;
-
-    Gen3A.Effect = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_EFFECT, EffLUT);
-    ret |= setEffect(Gen3A);
-
-    Gen3A.FlashMode = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_FLASH_MODE, FlashLUT);
-    ret |= setFlashMode(Gen3A);
-
-    Gen3A.SceneMode = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_SCENE_MODE, SceneLUT);
-    ret |= setScene(Gen3A);
-
-    Gen3A.EVCompensation = atoi(OMXCameraAdapter::DEFAULT_EV_COMPENSATION);
-    ret |= setEVCompensation(Gen3A);
-
-    Gen3A.Focus = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_FOCUS_MODE, FocusLUT);
-    ret |= setFocusMode(Gen3A);
-
-    Gen3A.ISO = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_ISO_MODE, IsoLUT);
-    ret |= setISO(Gen3A);
-
-    Gen3A.Flicker = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_ANTIBANDING, FlickerLUT);
-    ret |= setFlicker(Gen3A);
-
-    Gen3A.Brightness = atoi(OMXCameraAdapter::DEFAULT_BRIGHTNESS);
-    ret |= setBrightness(Gen3A);
-
-    Gen3A.Saturation = atoi(OMXCameraAdapter::DEFAULT_SATURATION) - SATURATION_OFFSET;
-    ret |= setSaturation(Gen3A);
-
-    Gen3A.Sharpness = atoi(OMXCameraAdapter::DEFAULT_SHARPNESS) - SHARPNESS_OFFSET;
-    ret |= setSharpness(Gen3A);
-
-    Gen3A.Contrast = atoi(OMXCameraAdapter::DEFAULT_CONTRAST) - CONTRAST_OFFSET;
-    ret |= setContrast(Gen3A);
-
-    Gen3A.WhiteBallance = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_WB, WBalLUT);
-    ret |= setWBMode(Gen3A);
-
-    Gen3A.Exposure = getLUTvalue_HALtoOMX(OMXCameraAdapter::DEFAULT_EXPOSURE_MODE, ExpLUT);
-    ret |= setExposureMode(Gen3A);
-
-    Gen3A.ExposureLock = OMX_FALSE;
-    ret |= setExposureLock(Gen3A);
-
-    Gen3A.FocusLock = OMX_FALSE;
-    ret |= setFocusLock(Gen3A);
-
-    Gen3A.WhiteBalanceLock = OMX_FALSE;
-    ret |= setWhiteBalanceLock(Gen3A);
-
-    LOG_FUNCTION_NAME_EXIT;
-
-    return NO_ERROR;
+    return num;
 }
 
 status_t OMXCameraAdapter::setExposureMode(Gen3A_settings& Gen3A)

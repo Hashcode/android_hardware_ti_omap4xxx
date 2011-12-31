@@ -22,10 +22,6 @@
 *
 */
 
-#undef LOG_TAG
-
-#define LOG_TAG "CameraHAL"
-
 #include "CameraHal.h"
 #include "OMXCameraAdapter.h"
 #include "ErrorUtils.h"
@@ -72,7 +68,7 @@ status_t OMXCameraAdapter::setParametersFocus(const CameraParameters &params,
         }
     }
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return ret;
 }
@@ -112,6 +108,8 @@ status_t OMXCameraAdapter::doAutoFocus()
        CAMHAL_LOGDA("Auto focus got canceled before doAutoFocus could be called");
        return NO_ERROR;
     }
+
+    OMX_INIT_STRUCT_PTR (&focusStatus, OMX_PARAM_FOCUSSTATUSTYPE);
 
     // If the app calls autoFocus, the camera will stop sending face callbacks.
     pauseFaceDetection(true);
@@ -153,8 +151,7 @@ status_t OMXCameraAdapter::doAutoFocus()
     }
 
     if ( (focusControl.eFocusControl == OMX_IMAGE_FocusControlAuto
-            && (focusStatus.eFocusStatus == OMX_FocusStatusRequest
-             || focusStatus.eFocusStatus == OMX_FocusStatusUnableToReach) ) ||
+            && focusStatus.eFocusStatus == OMX_FocusStatusRequest) ||
             (mParameters3A.Focus !=  (OMX_IMAGE_FOCUSCONTROLTYPE)OMX_IMAGE_FocusControlAuto) )
         {
         OMX_INIT_STRUCT_PTR (&bOMX, OMX_CONFIG_BOOLEANTYPE);
@@ -171,20 +168,13 @@ status_t OMXCameraAdapter::doAutoFocus()
                                     OMX_IndexConfigCommonFocusStatus,
                                     mDoAFSem);
 
-        // force AF, Ducati will take care of whether CAF
-        // or AF will be performed, depending on light conditions
-        if ( focusControl.eFocusControl == OMX_IMAGE_FocusControlAuto
-		&& focusStatus.eFocusStatus == OMX_FocusStatusUnableToReach )
-			{
-			focusControl.eFocusControl = OMX_IMAGE_FocusControlAutoLock;
-			}
+        if ( NO_ERROR == ret ) {
+            ret = setFocusCallback(true);
+        }
 
-        if ( focusControl.eFocusControl != OMX_IMAGE_FocusControlAuto )
-            {
-            eError =  OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
-                                    OMX_IndexConfigFocusControl,
-                                    &focusControl);
-            }
+        eError =  OMX_SetConfig(mCameraAdapterParameters.mHandleComp,
+                                OMX_IndexConfigFocusControl,
+                                &focusControl);
 
         if ( OMX_ErrorNone != eError ) {
             CAMHAL_LOGEB("Error while starting focus 0x%x", eError);
@@ -214,6 +204,9 @@ status_t OMXCameraAdapter::doAutoFocus()
                                         NULL );
             returnFocusStatus(true);
         } else {
+            CAMHAL_LOGDA("Autofocus callback received");
+            //Disable auto focus callback from Ducati
+            setFocusCallback(false);
             ret = returnFocusStatus(false);
         }
     } else { // Focus mode in continuous
@@ -253,6 +246,12 @@ status_t OMXCameraAdapter::stopAutoFocus()
         // No need to stop focus if we are in infinity mode. Nothing to stop.
         return NO_ERROR;
     }
+
+    if ( NO_ERROR == ret )
+       {
+       //Disable the callback first
+       ret = setFocusCallback(false);
+       }
 
     if ( NO_ERROR == ret )
         {

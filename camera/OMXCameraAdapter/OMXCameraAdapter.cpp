@@ -38,10 +38,6 @@ static int mDebugFcs = 0;
 
 namespace android {
 
-#undef LOG_TAG
-///Maintain a separate tag for OMXCameraAdapter logs to isolate issues OMX specific
-#define LOG_TAG "CameraHAL"
-
 //frames skipped before recalculating the framerate
 #define FPS_PERIOD 30
 
@@ -62,7 +58,6 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     OMX_ERRORTYPE eError = OMX_ErrorNone;
     status_t ret = NO_ERROR;
 
-
     mLocalVersionParam.s.nVersionMajor = 0x1;
     mLocalVersionParam.s.nVersionMinor = 0x1;
     mLocalVersionParam.s.nRevision = 0x0 ;
@@ -70,6 +65,7 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
 
     mPending3Asettings = 0;//E3AsettingsAll;
     mPendingCaptureSettings = 0;
+    mPendingPreviewSettings = 0;
 
     if ( 0 != mInitSem.Count() )
         {
@@ -78,34 +74,39 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
         return NO_INIT;
         }
 
-    if (mComponentState != OMX_StateLoaded && mComponentState != OMX_StateInvalid) {
-       CAMHAL_LOGEB("Error mComponentState %d is invalid!", mComponentState);
-       LOG_FUNCTION_NAME_EXIT;
-       return NO_INIT;
-    }
-
     ///Update the preview and image capture port indexes
     mCameraAdapterParameters.mPrevPortIndex = OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW;
     // temp changed in order to build OMX_CAMERA_PORT_VIDEO_OUT_IMAGE;
     mCameraAdapterParameters.mImagePortIndex = OMX_CAMERA_PORT_IMAGE_OUT_IMAGE;
     mCameraAdapterParameters.mMeasurementPortIndex = OMX_CAMERA_PORT_VIDEO_OUT_MEASUREMENT;
     //currently not supported use preview port instead
-    mCameraAdapterParameters.mVideoPortIndex = OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW;
+    mCameraAdapterParameters.mVideoPortIndex = OMX_CAMERA_PORT_VIDEO_OUT_VIDEO;
 
     eError = OMX_Init();
     if (eError != OMX_ErrorNone) {
-      CAMHAL_LOGEB("Error OMX_Init -0x%x", eError);
-      return eError;
+        CAMHAL_LOGEB("OMX_Init() failed, error: 0x%x", eError);
+        return ErrorUtils::omxToAndroidError(eError);
     }
+    mOmxInitialized = true;
+
+    // Initialize the callback handles
+    OMX_CALLBACKTYPE callbacks;
+    callbacks.EventHandler    = android::OMXCameraAdapterEventHandler;
+    callbacks.EmptyBufferDone = android::OMXCameraAdapterEmptyBufferDone;
+    callbacks.FillBufferDone  = android::OMXCameraAdapterFillBufferDone;
 
     ///Get the handle to the OMX Component
-    eError = OMXCameraAdapter::OMXCameraGetHandle(&mCameraAdapterParameters.mHandleComp, (OMX_PTR)this);
+    eError = OMXCameraAdapter::OMXCameraGetHandle(&mCameraAdapterParameters.mHandleComp, this, callbacks);
     if(eError != OMX_ErrorNone) {
         CAMHAL_LOGEB("OMX_GetHandle -0x%x", eError);
     }
     GOTO_EXIT_IF((eError != OMX_ErrorNone), eError);
 
+    mComponentState = OMX_StateLoaded;
+
     CAMHAL_LOGVB("OMX_GetHandle -0x%x sensor_index = %lu", eError, mSensorIndex);
+    initDccFileDataSave(&mCameraAdapterParameters.mHandleComp, mCameraAdapterParameters.mPrevPortIndex);
+
     eError = OMX_SendCommand(mCameraAdapterParameters.mHandleComp,
                                   OMX_CommandPortDisable,
                                   OMX_ALL,
@@ -163,22 +164,27 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
         CAMHAL_LOGDB("Sensor %d selected successfully", mSensorIndex);
     }
 
+#ifdef CAMERAHAL_DEBUG
+
     printComponentVersion(mCameraAdapterParameters.mHandleComp);
+
+#endif
 
     mBracketingEnabled = false;
     mBracketingBuffersQueuedCount = 0;
     mBracketingRange = 1;
     mLastBracetingBufferIdx = 0;
     mOMXStateSwitch = false;
+    mBracketingSet = false;
+    mRawCapture = false;
 
     mCaptureSignalled = false;
     mCaptureConfigured = false;
     mRecording = false;
     mWaitingForSnapshot = false;
     mSnapshotCount = 0;
-    mComponentState = OMX_StateLoaded;
 
-    mCapMode = HIGH_QUALITY;
+    mCapMode = INITIAL_MODE;
     mIPP = IPP_NULL;
     mVstabEnabled = false;
     mVnfEnabled = false;
@@ -225,7 +231,7 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     {
         if( ret == INVALID_OPERATION){
             CAMHAL_LOGDA("command handler thread already runnning!!");
-            ret = NO_ERROR;
+	    ret = NO_ERROR;
         } else
         {
             CAMHAL_LOGEA("Couldn't run command handlerthread");
@@ -248,24 +254,12 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     {
         if( ret == INVALID_OPERATION){
             CAMHAL_LOGDA("omx callback handler thread already runnning!!");
-            ret = NO_ERROR;
+	    ret = NO_ERROR;
         }else
         {
             CAMHAL_LOGEA("Couldn't run omx callback handler thread");
             return ret;
         }
-    }
-
-    //Remove any unhandled events
-    if (!mEventSignalQ.isEmpty()) {
-        for (unsigned int i = 0 ;i < mEventSignalQ.size(); i++ ) {
-            TIUTILS::Message *msg = mEventSignalQ.itemAt(i);
-            //remove from queue and free msg
-            if ( NULL != msg ) {
-                free(msg);
-            }
-        }
-        mEventSignalQ.clear();
     }
 
     OMX_INIT_STRUCT_PTR (&mRegionPriority, OMX_TI_CONFIG_3A_REGION_PRIORITY);
@@ -281,16 +275,12 @@ status_t OMXCameraAdapter::initialize(CameraProperties::Properties* caps)
     mMeasurementEnabled = false;
     mFaceDetectionRunning = false;
     mFaceDetectionPaused = false;
+    mFDSkip = 1;
+
 
     memset(&mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mImagePortIndex], 0, sizeof(OMXCameraPortParameters));
     memset(&mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex], 0, sizeof(OMXCameraPortParameters));
-
-    //Initialize 3A defaults
-    ret = apply3ADefaults(mParameters3A);
-    if ( NO_ERROR != ret ) {
-        CAMHAL_LOGEA("Couldn't apply 3A defaults!");
-        goto EXIT;
-    }
+    memset(&mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mVideoPortIndex], 0, sizeof(OMXCameraPortParameters));
 
     LOG_FUNCTION_NAME_EXIT;
     return ErrorUtils::omxToAndroidError(eError);
@@ -324,8 +314,10 @@ OMXCameraAdapter::OMXCameraPortParameters *OMXCameraAdapter::getPortParams(Camer
     switch ( frameType )
     {
     case CameraFrame::IMAGE_FRAME:
-    case CameraFrame::RAW_FRAME:
         ret = &mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mImagePortIndex];
+        break;
+    case CameraFrame::RAW_FRAME:
+        ret = &mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mVideoPortIndex];
         break;
     case CameraFrame::PREVIEW_FRAME_SYNC:
     case CameraFrame::SNAPSHOT_FRAME:
@@ -344,6 +336,8 @@ OMXCameraAdapter::OMXCameraPortParameters *OMXCameraAdapter::getPortParams(Camer
 
 status_t OMXCameraAdapter::fillThisBuffer(void* frameBuf, CameraFrame::FrameType frameType)
 {
+    LOG_FUNCTION_NAME;
+
     status_t ret = NO_ERROR;
     OMXCameraPortParameters *port = NULL;
     OMX_ERRORTYPE eError = OMX_ErrorNone;
@@ -413,17 +407,53 @@ EXIT:
     return (ret | ErrorUtils::omxToAndroidError(eError));
 }
 
+void OMXCameraAdapter::setParamS3D(OMX_U32 port, const char *valstr)
+{
+    OMXCameraPortParameters *cap;
+
+    LOG_FUNCTION_NAME;
+
+    cap = &mCameraAdapterParameters.mCameraPortParams[port];
+    if (valstr != NULL)
+        {
+        if (strcmp(valstr, TICameraParameters::S3D_TB_FULL) == 0)
+            {
+            cap->mFrameLayoutType = OMX_TI_StereoFrameLayoutTopBottom;
+            }
+        else if (strcmp(valstr, TICameraParameters::S3D_SS_FULL) == 0)
+            {
+            cap->mFrameLayoutType = OMX_TI_StereoFrameLayoutLeftRight;
+            }
+        else if (strcmp(valstr, TICameraParameters::S3D_TB_SUBSAMPLED) == 0)
+            {
+            cap->mFrameLayoutType = OMX_TI_StereoFrameLayoutTopBottomSubsample;
+            }
+        else if (strcmp(valstr, TICameraParameters::S3D_SS_SUBSAMPLED) == 0)
+            {
+            cap->mFrameLayoutType = OMX_TI_StereoFrameLayoutLeftRightSubsample;
+            }
+        else
+            {
+            cap->mFrameLayoutType = OMX_TI_StereoFrameLayout2D;
+            }
+        }
+    else
+        {
+        cap->mFrameLayoutType = OMX_TI_StereoFrameLayout2D;
+        }
+
+    LOG_FUNCTION_NAME_EXIT;
+}
+
 status_t OMXCameraAdapter::setParameters(const CameraParameters &params)
 {
     LOG_FUNCTION_NAME;
 
-    const char * str = NULL;
     int mode = 0;
     status_t ret = NO_ERROR;
     bool updateImagePortParams = false;
     int minFramerate, maxFramerate, frameRate;
     const char *valstr = NULL;
-    const char *oldstr = NULL;
     int w, h;
     OMX_COLOR_FORMATTYPE pixFormat;
     BaseCameraAdapter::AdapterState state;
@@ -490,12 +520,6 @@ status_t OMXCameraAdapter::setParameters(const CameraParameters &params)
             }
         }
 
-    // TODO(XXX): Limiting 1080p to (24,24) or (15,15) for now. Need to remove later.
-    if ((w >= 1920) && (h >= 1080)) {
-        cap->mMaxFrameRate = cap->mMinFrameRate;
-        setVFramerate(cap->mMinFrameRate, cap->mMaxFrameRate);
-    }
-
     if ( 0 < frameRate )
         {
         cap->mColorFormat = pixFormat;
@@ -561,6 +585,9 @@ status_t OMXCameraAdapter::setParameters(const CameraParameters &params)
         //Disable measurement data by default
         mMeasurementEnabled = false;
         }
+
+    setParamS3D(mCameraAdapterParameters.mPrevPortIndex,
+               params.get(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT));
 
     ret |= setParametersCapture(params, state);
 
@@ -636,9 +663,7 @@ void OMXCameraAdapter::getParameters(CameraParameters& params)
     if( mParameters3A.SceneMode != OMX_Manual ) {
        const char *valstr_supported = NULL;
 
-       // if preview is not started...we still need to feedback the proper params
-       // look up the settings in the LUT
-       if (((state & PREVIEW_ACTIVE) == 0) && mCapabilities) {
+       if (mCapabilities) {
            const SceneModesEntry* entry = NULL;
            entry = getSceneModeEntry(mCapabilities->get(CameraProperties::CAMERA_NAME),
                                     (OMX_SCENEMODETYPE) mParameters3A.SceneMode);
@@ -756,7 +781,11 @@ void OMXCameraAdapter::getParameters(CameraParameters& params)
 
 status_t OMXCameraAdapter::setFormat(OMX_U32 port, OMXCameraPortParameters &portParams)
 {
+    size_t overclockWidth;
+    size_t overclockHeight;
+    int sensorID = -1;
     size_t bufferCount;
+    status_t ret = NO_ERROR;
 
     LOG_FUNCTION_NAME;
 
@@ -769,131 +798,152 @@ status_t OMXCameraAdapter::setFormat(OMX_U32 port, OMXCameraPortParameters &port
 
     eError = OMX_GetParameter (mCameraAdapterParameters.mHandleComp,
                                 OMX_IndexParamPortDefinition, &portCheck);
-    if(eError!=OMX_ErrorNone)
-        {
+    if (eError!=OMX_ErrorNone) {
         CAMHAL_LOGEB("OMX_GetParameter - %x", eError);
-        }
+    }
     GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
 
-    if ( OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW == port )
-        {
+    if (OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW == port) {
         portCheck.format.video.nFrameWidth      = portParams.mWidth;
         portCheck.format.video.nFrameHeight     = portParams.mHeight;
         portCheck.format.video.eColorFormat     = portParams.mColorFormat;
         portCheck.format.video.nStride          = portParams.mStride;
-        if( ( portCheck.format.video.nFrameWidth >= 1920 ) &&
-            ( portCheck.format.video.nFrameHeight >= 1080 ) &&
-            ( portParams.mFrameRate >= FRAME_RATE_FULL_HD ) )
-            {
+
+        if ( ( mSensorOrientation == 90 ) || ( mSensorOrientation == 270 ) ) {
+            overclockWidth = 1080;
+            overclockHeight = 1920;
+        } else {
+            overclockWidth = 1920;
+            overclockHeight = 1080;
+        }
+
+        sensorID = mCapabilities->getInt(CameraProperties::CAMERA_SENSOR_ID);
+        if( ( ( sensorID == SENSORID_IMX060 ) &&
+              ( portCheck.format.video.nFrameWidth >= overclockWidth ) &&
+              ( portCheck.format.video.nFrameHeight >= overclockHeight ) &&
+              ( portParams.mFrameRate >= FRAME_RATE_FULL_HD ) ) ||
+            ( ( sensorID == SENSORID_OV5640 ) &&
+              ( portCheck.format.video.nFrameWidth >= overclockWidth ) &&
+              ( portCheck.format.video.nFrameHeight >= overclockHeight ) ) ){
             setSensorOverclock(true);
-            }
-        else
-            {
+        } else {
             setSensorOverclock(false);
-            }
+        }
 
         portCheck.format.video.xFramerate       = portParams.mFrameRate<<16;
         portCheck.nBufferSize                   = portParams.mStride * portParams.mHeight;
         portCheck.nBufferCountActual = portParams.mNumBufs;
         mFocusThreshold = FOCUS_THRESHOLD * portParams.mFrameRate;
-        }
-    else if ( OMX_CAMERA_PORT_IMAGE_OUT_IMAGE == port )
-        {
+        // Used for RAW capture
+    } else if (OMX_CAMERA_PORT_VIDEO_OUT_VIDEO == port) {
+        portCheck.format.video.nFrameWidth      = portParams.mWidth;
+        portCheck.format.video.nFrameHeight     = portParams.mHeight;
+        portCheck.format.video.eColorFormat     = OMX_COLOR_FormatRawBayer10bit;//portParams.mColorFormat;
+        portCheck.nBufferCountActual            = 1;//portParams.mNumBufs;
+    } else if (OMX_CAMERA_PORT_IMAGE_OUT_IMAGE == port) {
         portCheck.format.image.nFrameWidth      = portParams.mWidth;
         portCheck.format.image.nFrameHeight     = portParams.mHeight;
-        if ( OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingNone )
-            {
+        if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingNone) {
             portCheck.format.image.eColorFormat     = OMX_COLOR_FormatCbYCrY;
             portCheck.format.image.eCompressionFormat = OMX_IMAGE_CodingJPEG;
-            }
-        else if ( OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingJPS )
-            {
+        } else if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingJPS) {
             portCheck.format.image.eColorFormat       = OMX_COLOR_FormatCbYCrY;
             portCheck.format.image.eCompressionFormat = (OMX_IMAGE_CODINGTYPE) OMX_TI_IMAGE_CodingJPS;
-            }
-        else if ( OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingMPO )
-            {
+        } else if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingMPO) {
             portCheck.format.image.eColorFormat       = OMX_COLOR_FormatCbYCrY;
             portCheck.format.image.eCompressionFormat = (OMX_IMAGE_CODINGTYPE) OMX_TI_IMAGE_CodingMPO;
-            }
-        else if ( OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingRAWJPEG )
-            {
+        } else if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingRAWJPEG) {
             //TODO: OMX_IMAGE_CodingJPEG should be changed to OMX_IMAGE_CodingRAWJPEG when
             // RAW format is supported
             portCheck.format.image.eColorFormat       = OMX_COLOR_FormatCbYCrY;
             portCheck.format.image.eCompressionFormat = OMX_IMAGE_CodingJPEG;
-            }
-        else if ( OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingRAWMPO )
-            {
+        } else if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingRAWMPO) {
             //TODO: OMX_IMAGE_CodingJPEG should be changed to OMX_IMAGE_CodingRAWMPO when
             // RAW format is supported
             portCheck.format.image.eColorFormat       = OMX_COLOR_FormatCbYCrY;
             portCheck.format.image.eCompressionFormat = OMX_IMAGE_CodingJPEG;
-            }
-        else
-            {
+        } else if (OMX_COLOR_FormatUnused == portParams.mColorFormat && mCodingMode == CodingRAWJPS) {
+            //TODO: OMX_IMAGE_CodingJPEG should be changed to OMX_IMAGE_CodingRAWMPO when
+            // RAW format is supported
+            portCheck.format.image.eColorFormat       = OMX_COLOR_FormatCbYCrY;
+            portCheck.format.image.eCompressionFormat = (OMX_IMAGE_CODINGTYPE) OMX_TI_IMAGE_CodingJPS;
+        } else {
             portCheck.format.image.eColorFormat     = portParams.mColorFormat;
             portCheck.format.image.eCompressionFormat = OMX_IMAGE_CodingUnused;
-            }
+        }
 
         //Stride for 1D tiler buffer is zero
         portCheck.format.image.nStride          =  0;
         portCheck.nBufferSize                   =  portParams.mStride * portParams.mWidth * portParams.mHeight;
         portCheck.nBufferCountActual = portParams.mNumBufs;
-        }
-    else
-        {
-        CAMHAL_LOGEB("Unsupported port index 0x%x", (unsigned int)port);
+    } else {
+        CAMHAL_LOGEB("Unsupported port index (%lu)", port);
+    }
+
+    if ( mSensorIndex == OMX_TI_StereoSensor ) {
+        ret = setS3DFrameLayout(port);
+        if ( NO_ERROR != ret )
+            {
+            CAMHAL_LOGEA("Error configuring stereo 3D frame layout");
+            return ret;
+            }
         }
 
     eError = OMX_SetParameter(mCameraAdapterParameters.mHandleComp,
-                            OMX_IndexParamPortDefinition, &portCheck);
-    if(eError!=OMX_ErrorNone)
-        {
+            OMX_IndexParamPortDefinition, &portCheck);
+    if (eError!=OMX_ErrorNone) {
         CAMHAL_LOGEB("OMX_SetParameter - %x", eError);
-        }
+    }
     GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
 
     /* check if parameters are set correctly by calling GetParameter() */
     eError = OMX_GetParameter(mCameraAdapterParameters.mHandleComp,
-                                        OMX_IndexParamPortDefinition, &portCheck);
-    if(eError!=OMX_ErrorNone)
-        {
+            OMX_IndexParamPortDefinition, &portCheck);
+    if (eError!=OMX_ErrorNone) {
         CAMHAL_LOGEB("OMX_GetParameter - %x", eError);
-        }
+    }
     GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
 
     portParams.mBufSize = portCheck.nBufferSize;
     portParams.mStride = portCheck.format.image.nStride;
 
-    if ( OMX_CAMERA_PORT_IMAGE_OUT_IMAGE == port )
-        {
+    if (OMX_CAMERA_PORT_IMAGE_OUT_IMAGE == port) {
         CAMHAL_LOGDB("\n *** IMG Width = %ld", portCheck.format.image.nFrameWidth);
-        CAMHAL_LOGDB("\n ***IMG Height = %ld", portCheck.format.image.nFrameHeight);
+        CAMHAL_LOGDB("\n *** IMG Height = %ld", portCheck.format.image.nFrameHeight);
 
-        CAMHAL_LOGDB("\n ***IMG IMG FMT = %x", portCheck.format.image.eColorFormat);
-        CAMHAL_LOGDB("\n ***IMG portCheck.nBufferSize = %ld\n",portCheck.nBufferSize);
-        CAMHAL_LOGDB("\n ***IMG portCheck.nBufferCountMin = %ld\n",
-                                                portCheck.nBufferCountMin);
-        CAMHAL_LOGDB("\n ***IMG portCheck.nBufferCountActual = %ld\n",
-                                                portCheck.nBufferCountActual);
-        CAMHAL_LOGDB("\n ***IMG portCheck.format.image.nStride = %ld\n",
-                                                portCheck.format.image.nStride);
-        }
-    else
-        {
+        CAMHAL_LOGDB("\n *** IMG IMG FMT = %x", portCheck.format.image.eColorFormat);
+        CAMHAL_LOGDB("\n *** IMG portCheck.nBufferSize = %ld\n",portCheck.nBufferSize);
+        CAMHAL_LOGDB("\n *** IMG portCheck.nBufferCountMin = %ld\n",
+                portCheck.nBufferCountMin);
+        CAMHAL_LOGDB("\n *** IMG portCheck.nBufferCountActual = %ld\n",
+                portCheck.nBufferCountActual);
+        CAMHAL_LOGDB("\n *** IMG portCheck.format.image.nStride = %ld\n",
+                portCheck.format.image.nStride);
+    } else if (OMX_CAMERA_PORT_VIDEO_OUT_PREVIEW == port) {
         CAMHAL_LOGDB("\n *** PRV Width = %ld", portCheck.format.video.nFrameWidth);
-        CAMHAL_LOGDB("\n ***PRV Height = %ld", portCheck.format.video.nFrameHeight);
+        CAMHAL_LOGDB("\n *** PRV Height = %ld", portCheck.format.video.nFrameHeight);
 
-        CAMHAL_LOGDB("\n ***PRV IMG FMT = %x", portCheck.format.video.eColorFormat);
-        CAMHAL_LOGDB("\n ***PRV portCheck.nBufferSize = %ld\n",portCheck.nBufferSize);
-        CAMHAL_LOGDB("\n ***PRV portCheck.nBufferCountMin = %ld\n",
-                                                portCheck.nBufferCountMin);
-        CAMHAL_LOGDB("\n ***PRV portCheck.nBufferCountActual = %ld\n",
-                                                portCheck.nBufferCountActual);
+        CAMHAL_LOGDB("\n *** PRV IMG FMT = %x", portCheck.format.video.eColorFormat);
+        CAMHAL_LOGDB("\n *** PRV portCheck.nBufferSize = %ld\n",portCheck.nBufferSize);
+        CAMHAL_LOGDB("\n *** PRV portCheck.nBufferCountMin = %ld\n",
+                portCheck.nBufferCountMin);
+        CAMHAL_LOGDB("\n *** PRV portCheck.nBufferCountActual = %ld\n",
+                portCheck.nBufferCountActual);
         CAMHAL_LOGDB("\n ***PRV portCheck.format.video.nStride = %ld\n",
-                                                portCheck.format.video.nStride);
-        }
+                portCheck.format.video.nStride);
+    } else {
+        CAMHAL_LOGDB("\n *** VID Width = %ld", portCheck.format.video.nFrameWidth);
+        CAMHAL_LOGDB("\n *** VID Height = %ld", portCheck.format.video.nFrameHeight);
+
+        CAMHAL_LOGDB("\n *** VID IMG FMT = %x", portCheck.format.video.eColorFormat);
+        CAMHAL_LOGDB("\n *** VID portCheck.nBufferSize = %ld\n",portCheck.nBufferSize);
+        CAMHAL_LOGDB("\n *** VID portCheck.nBufferCountMin = %ld\n",
+                portCheck.nBufferCountMin);
+        CAMHAL_LOGDB("\n *** VID portCheck.nBufferCountActual = %ld\n",
+                portCheck.nBufferCountActual);
+        CAMHAL_LOGDB("\n *** VID portCheck.format.video.nStride = %ld\n",
+                portCheck.format.video.nStride);
+    }
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -901,7 +951,7 @@ status_t OMXCameraAdapter::setFormat(OMX_U32 port, OMXCameraPortParameters &port
 
     EXIT:
 
-    CAMHAL_LOGEB("Exiting function %s because of eError=%x", __FUNCTION__, eError);
+    CAMHAL_LOGEB("Exiting function %s because of eError = 0x%x", __FUNCTION__, eError);
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -910,11 +960,10 @@ status_t OMXCameraAdapter::setFormat(OMX_U32 port, OMXCameraPortParameters &port
 
 status_t OMXCameraAdapter::flushBuffers()
 {
+    LOG_FUNCTION_NAME;
+
     status_t ret = NO_ERROR;
     OMX_ERRORTYPE eError = OMX_ErrorNone;
-    TIMM_OSAL_ERRORTYPE err;
-    TIMM_OSAL_U32 uRequestedEvents = OMXCameraAdapter::CAMERA_PORT_FLUSH;
-    TIMM_OSAL_U32 pRetrievedEvents;
 
     if ( 0 != mFlushSem.Count() )
         {
@@ -922,8 +971,6 @@ status_t OMXCameraAdapter::flushBuffers()
         LOG_FUNCTION_NAME_EXIT;
         return NO_INIT;
         }
-
-    LOG_FUNCTION_NAME;
 
     OMXCameraPortParameters * mPreviewData = NULL;
     mPreviewData = &mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex];
@@ -1015,15 +1062,15 @@ status_t OMXCameraAdapter::useBuffers(CameraMode mode, void* bufArr, int num, si
             break;
 
         case CAMERA_VIDEO:
-            mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex].mNumBufs =  num;
-            mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mPrevPortIndex].mMaxQueueable = queueable;
-            ret = UseBuffersPreview(bufArr, num);
+            mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mVideoPortIndex].mNumBufs =  num;
+            mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mVideoPortIndex].mMaxQueueable = queueable;
+            ret = UseBuffersRawCapture(bufArr, num);
             break;
 
         case CAMERA_MEASUREMENT:
             mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mMeasurementPortIndex].mNumBufs = num;
             mCameraAdapterParameters.mCameraPortParams[mCameraAdapterParameters.mMeasurementPortIndex].mMaxQueueable = queueable;
-            ret = UseBuffersPreviewData(bufArr, num);
+            ret = UseBuffersPreview(bufArr, num);
             break;
 
         }
@@ -1159,7 +1206,7 @@ status_t OMXCameraAdapter::switchToExecuting()
   msg.arg1 = mErrorNotifier;
   ret = mCommandHandler->put(&msg);
 
-  LOG_FUNCTION_NAME;
+  LOG_FUNCTION_NAME_EXIT;
 
   return ret;
 }
@@ -1459,13 +1506,6 @@ status_t OMXCameraAdapter::UseBuffersPreview(void* bufArr, int num)
 
     LOG_FUNCTION_NAME;
 
-    ///Flag to determine whether it is 3D camera or not
-    bool isS3d = false;
-    const char *valstr = NULL;
-    if ( (valstr = mParams.get(TICameraParameters::KEY_S3D_SUPPORTED)) != NULL) {
-        isS3d = (strcmp(valstr, "true") == 0);
-    }
-
     if(!bufArr)
         {
         CAMHAL_LOGEA("NULL pointer passed for buffArr");
@@ -1496,85 +1536,58 @@ status_t OMXCameraAdapter::UseBuffersPreview(void* bufArr, int num)
 
     mStateSwitchLock.lock();
 
-    if ( mComponentState == OMX_StateLoaded )
-        {
+    if ( mComponentState == OMX_StateLoaded ) {
 
-        ret = setLDC(mIPP);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setLDC() failed %d", ret);
-            LOG_FUNCTION_NAME_EXIT;
-            return ret;
-            }
-
-        ret = setNSF(mIPP);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setNSF() failed %d", ret);
-            LOG_FUNCTION_NAME_EXIT;
-            return ret;
-            }
-
-        ret = setCaptureMode(mCapMode);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setCaptureMode() failed %d", ret);
-            LOG_FUNCTION_NAME_EXIT;
-            return ret;
-            }
-
-        CAMHAL_LOGDB("Camera Mode = %d", mCapMode);
-
-        if( ( mCapMode == OMXCameraAdapter::VIDEO_MODE ) ||
-            ( isS3d && (mCapMode == OMXCameraAdapter::HIGH_QUALITY)) )
-            {
-            ///Enable/Disable Video Noise Filter
-            ret = enableVideoNoiseFilter(mVnfEnabled);
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VNF %x", ret);
-                return ret;
-                }
-
-            ///Enable/Disable Video Stabilization
-            ret = enableVideoStabilization(mVstabEnabled);
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
-                return ret;
-                }
-            }
-        else
-            {
-            ret = enableVideoNoiseFilter(false);
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VNF %x", ret);
-                return ret;
-                }
-            ///Enable/Disable Video Stabilization
-            ret = enableVideoStabilization(false);
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
-                return ret;
-                }
+        if (mPendingPreviewSettings & SetLDC) {
+            mPendingPreviewSettings &= ~SetLDC;
+            ret = setLDC(mIPP);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setLDC() failed %d", ret);
             }
         }
+
+        if (mPendingPreviewSettings & SetNSF) {
+            mPendingPreviewSettings &= ~SetNSF;
+            ret = setNSF(mIPP);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setNSF() failed %d", ret);
+            }
+        }
+
+        if (mPendingPreviewSettings & SetCapMode) {
+            mPendingPreviewSettings &= ~SetCapMode;
+            ret = setCaptureMode(mCapMode);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setCaptureMode() failed %d", ret);
+            }
+        }
+
+        if(mCapMode == OMXCameraAdapter::VIDEO_MODE) {
+
+            if (mPendingPreviewSettings & SetVNF) {
+                mPendingPreviewSettings &= ~SetVNF;
+                ret = enableVideoNoiseFilter(mVnfEnabled);
+                if ( NO_ERROR != ret){
+                    CAMHAL_LOGEB("Error configuring VNF %x", ret);
+                }
+            }
+
+            if (mPendingPreviewSettings & SetVSTAB) {
+                mPendingPreviewSettings &= ~SetVSTAB;
+                ret = enableVideoStabilization(mVstabEnabled);
+                if ( NO_ERROR != ret) {
+                    CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
+                }
+            }
+
+        }
+    }
 
     ret = setSensorOrientation(mSensorOrientation);
     if ( NO_ERROR != ret )
         {
         CAMHAL_LOGEB("Error configuring Sensor Orientation %x", ret);
         mSensorOrientation = 0;
-        }
-
-    ret = setVFramerate(mPreviewData->mMinFrameRate, mPreviewData->mMaxFrameRate);
-    if ( ret != NO_ERROR )
-        {
-        CAMHAL_LOGEB("VFR configuration failed 0x%x", ret);
-        LOG_FUNCTION_NAME_EXIT;
-        return ret;
         }
 
     if ( mComponentState == OMX_StateLoaded )
@@ -1831,7 +1844,6 @@ status_t OMXCameraAdapter::startPreview()
 
     mStateSwitchLock.unlock();
 
-    apply3Asettings(mParameters3A);
     //Queue all the buffers on preview port
     for(int index=0;index< mPreviewData->mMaxQueueable;index++)
         {
@@ -1880,16 +1892,6 @@ status_t OMXCameraAdapter::startPreview()
                                &extraDataControl);
         GOTO_EXIT_IF((eError!=OMX_ErrorNone), eError);
         }
-
-
-    if ( mPending3Asettings )
-        apply3Asettings(mParameters3A);
-
-    // enable focus callbacks just once here
-    // fixes an issue with slow callback registration in Ducati
-    if ( NO_ERROR == ret ) {
-        ret = setFocusCallback(true);
-    }
 
     //reset frame rate estimates
     mFPS = 0.0f;
@@ -2094,9 +2096,12 @@ status_t OMXCameraAdapter::stopPreview()
 
     mFirstTimeInit = true;
     mPendingCaptureSettings = 0;
+    mPendingPreviewSettings = 0;
     mFramesWithDucati = 0;
     mFramesWithDisplay = 0;
     mFramesWithEncoder = 0;
+
+    saveDccFileDataSave();
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -2252,6 +2257,61 @@ status_t OMXCameraAdapter::printComponentVersion(OMX_HANDLETYPE handle)
     return ret;
 }
 
+status_t OMXCameraAdapter::setS3DFrameLayout(OMX_U32 port) const
+{
+    OMX_ERRORTYPE eError = OMX_ErrorNone;
+    OMX_TI_FRAMELAYOUTTYPE frameLayout;
+    const OMXCameraPortParameters *cap =
+        &mCameraAdapterParameters.mCameraPortParams[port];
+
+    LOG_FUNCTION_NAME;
+
+    OMX_INIT_STRUCT_PTR (&frameLayout, OMX_TI_FRAMELAYOUTTYPE);
+    frameLayout.nPortIndex = port;
+    eError = OMX_GetParameter(mCameraAdapterParameters.mHandleComp,
+            (OMX_INDEXTYPE)OMX_TI_IndexParamStereoFrmLayout, &frameLayout);
+    if (eError != OMX_ErrorNone)
+        {
+        CAMHAL_LOGEB("Error while getting S3D frame layout: 0x%x", eError);
+        return -EINVAL;
+        }
+
+    if (cap->mFrameLayoutType == OMX_TI_StereoFrameLayoutTopBottomSubsample)
+        {
+        frameLayout.eFrameLayout = OMX_TI_StereoFrameLayoutTopBottom;
+        frameLayout.nSubsampleRatio = 2;
+        }
+    else if (cap->mFrameLayoutType ==
+                OMX_TI_StereoFrameLayoutLeftRightSubsample)
+        {
+        frameLayout.eFrameLayout = OMX_TI_StereoFrameLayoutLeftRight;
+        frameLayout.nSubsampleRatio = 2;
+        }
+    else
+        {
+        frameLayout.eFrameLayout = cap->mFrameLayoutType;
+        frameLayout.nSubsampleRatio = 1;
+        }
+    frameLayout.nSubsampleRatio = frameLayout.nSubsampleRatio << 7;
+
+    eError = OMX_SetParameter(mCameraAdapterParameters.mHandleComp,
+            (OMX_INDEXTYPE)OMX_TI_IndexParamStereoFrmLayout, &frameLayout);
+    if (eError != OMX_ErrorNone)
+        {
+        CAMHAL_LOGEB("Error while setting S3D frame layout: 0x%x", eError);
+        return -EINVAL;
+        }
+    else
+        {
+        CAMHAL_LOGDB("S3D frame layout %d applied successfully on port %lu",
+                        frameLayout.eFrameLayout, port);
+        }
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return NO_ERROR;
+}
+
 status_t OMXCameraAdapter::autoFocus()
 {
     status_t ret = NO_ERROR;
@@ -2278,7 +2338,7 @@ status_t OMXCameraAdapter::autoFocus()
 
  EXIT:
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return ret;
 }
@@ -2351,78 +2411,54 @@ status_t OMXCameraAdapter::getFrameSize(size_t &width, size_t &height)
     if ( OMX_StateLoaded == mComponentState )
         {
 
-        ret = setLDC(mIPP);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setLDC() failed %d", ret);
-            LOG_FUNCTION_NAME_EXIT;
-            goto exit;
+        if (mPendingPreviewSettings & SetLDC) {
+            mPendingPreviewSettings &= ~SetLDC;
+            ret = setLDC(mIPP);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setLDC() failed %d", ret);
+                LOG_FUNCTION_NAME_EXIT;
+                goto exit;
             }
+        }
 
-        ret = setNSF(mIPP);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setNSF() failed %d", ret);
-            LOG_FUNCTION_NAME_EXIT;
-            goto exit;
+        if (mPendingPreviewSettings & SetNSF) {
+            mPendingPreviewSettings &= ~SetNSF;
+            ret = setNSF(mIPP);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setNSF() failed %d", ret);
+                LOG_FUNCTION_NAME_EXIT;
+                goto exit;
             }
+        }
 
-        ret = setCaptureMode(mCapMode);
-        if ( NO_ERROR != ret )
-            {
-            CAMHAL_LOGEB("setCaptureMode() failed %d", ret);
+        if (mPendingPreviewSettings & SetCapMode) {
+            mPendingPreviewSettings &= ~SetCapMode;
+            ret = setCaptureMode(mCapMode);
+            if ( NO_ERROR != ret ) {
+                CAMHAL_LOGEB("setCaptureMode() failed %d", ret);
             }
+        }
 
-        if(mCapMode == OMXCameraAdapter::VIDEO_MODE)
-            {
-            if ( NO_ERROR == ret )
-                {
-                ///Enable/Disable Video Noise Filter
+        if(mCapMode == OMXCameraAdapter::VIDEO_MODE) {
+
+            if (mPendingPreviewSettings & SetVNF) {
+                mPendingPreviewSettings &= ~SetVNF;
                 ret = enableVideoNoiseFilter(mVnfEnabled);
+                if ( NO_ERROR != ret){
+                    CAMHAL_LOGEB("Error configuring VNF %x", ret);
                 }
+            }
 
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VNF %x", ret);
-                }
-
-            if ( NO_ERROR == ret )
-                {
-                ///Enable/Disable Video Stabilization
+            if (mPendingPreviewSettings & SetVSTAB) {
+                mPendingPreviewSettings &= ~SetVSTAB;
                 ret = enableVideoStabilization(mVstabEnabled);
-                }
-
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
-                }
-             }
-        else
-            {
-            if ( NO_ERROR == ret )
-                {
-                ///Enable/Disable Video Noise Filter
-                ret = enableVideoNoiseFilter(false);
-                }
-
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VNF %x", ret);
-                }
-
-            if ( NO_ERROR == ret )
-                {
-                ///Enable/Disable Video Stabilization
-                ret = enableVideoStabilization(false);
-                }
-
-            if ( NO_ERROR != ret)
-                {
-                CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
+                if ( NO_ERROR != ret) {
+                    CAMHAL_LOGEB("Error configuring VSTAB %x", ret);
                 }
             }
 
         }
+    }
 
     ret = setSensorOrientation(mSensorOrientation);
     if ( NO_ERROR != ret )
@@ -2947,21 +2983,17 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
             if ( NULL != extraData )
                 {
                 ancillaryData = (OMX_TI_ANCILLARYDATATYPE*) extraData->data;
-                snapshotFrame = ancillaryData->nDCCStatus;
+                if ((OMX_2D_Snap == ancillaryData->eCameraView)
+                    || (OMX_3D_Left_Snap == ancillaryData->eCameraView)
+                    || (OMX_3D_Right_Snap == ancillaryData->eCameraView))
+                    {
+                    snapshotFrame = OMX_TRUE;
+                    }
+                else
+                    {
+                    snapshotFrame = OMX_FALSE;
+                    }
                 }
-            }
-
-        recalculateFPS();
-
-            {
-            Mutex::Autolock lock(mFaceDetectionLock);
-            if ( mFaceDetectionRunning && !mFaceDetectionPaused ) {
-                detectFaces(pBuffHeader, fdResult, pPortParam->mWidth, pPortParam->mHeight);
-                if ( NULL != fdResult.get() ) {
-                    notifyFaceSubscribers(fdResult);
-                    fdResult.clear();
-                }
-            }
             }
 
         if ( (nextState & CAPTURE_ACTIVE) )
@@ -3009,7 +3041,7 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
 
         mFramesWithDucati--;
 
-#ifdef DEBUG_LOG
+#ifdef CAMERAHAL_DEBUG
         if(mBuffersWithDucati.indexOfKey((int)pBuffHeader->pBuffer)<0)
             {
             LOGE("Buffer was never with Ducati!! 0x%x", pBuffHeader->pBuffer);
@@ -3020,6 +3052,22 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
 
         if(mDebugFcs)
             CAMHAL_LOGEB("C[%d] D[%d] E[%d]", mFramesWithDucati, mFramesWithDisplay, mFramesWithEncoder);
+
+        recalculateFPS();
+
+        if ( 0 == ( mFrameCount % mFDSkip ) ) {
+            Mutex::Autolock lock(mFaceDetectionLock);
+            if ( mFaceDetectionRunning && !mFaceDetectionPaused ) {
+                detectFaces(pBuffHeader, fdResult, pPortParam->mWidth, pPortParam->mHeight);
+                if ( NULL != fdResult.get() ) {
+                    notifyFaceSubscribers(fdResult);
+                    fdResult.clear();
+                }
+                recalculateFDSkip(mFDSkip, mFPS, FD_PERIOD);
+            }
+        }
+
+        sniffDccFileDataSave(pBuffHeader);
 
         stat |= advanceZoom();
 
@@ -3108,8 +3156,21 @@ OMX_ERRORTYPE OMXCameraAdapter::OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLE
         stat = sendCallBacks(cameraFrame, pBuffHeader, mask, pPortParam);
 
         }
-    else
-        {
+        else if (pBuffHeader->nOutputPortIndex == OMX_CAMERA_PORT_VIDEO_OUT_VIDEO) {
+            typeOfFrame = CameraFrame::RAW_FRAME;
+            pPortParam->mImageType = typeOfFrame;
+            {
+                Mutex::Autolock lock(mLock);
+                if( ( CAPTURE_ACTIVE & state ) != CAPTURE_ACTIVE ) {
+                    goto EXIT;
+                }
+            }
+
+            CAMHAL_LOGEB ("RAW buffer done on video port, length = %d", pBuffHeader->nFilledLen);
+
+            mask = (unsigned int) CameraFrame::RAW_FRAME;
+            stat = sendCallBacks(cameraFrame, pBuffHeader, mask, pPortParam);
+        } else {
         CAMHAL_LOGEA("Frame received for non-(preview/capture/measure) port. This is yet to be supported");
         goto EXIT;
         }
@@ -3170,6 +3231,28 @@ status_t OMXCameraAdapter::recalculateFPS()
         mLastFPS = mFPS;
         mIter++;
         }
+
+    return NO_ERROR;
+}
+
+status_t OMXCameraAdapter::recalculateFDSkip(uint32_t &skip, uint32_t currentFPS, uint32_t period)
+{
+    size_t framePeriod;
+
+    LOG_FUNCTION_NAME;
+
+    if ( 0 < currentFPS ) {
+        framePeriod = 1000 / currentFPS;
+        if ( (framePeriod < period ) && ( 0 < framePeriod ) ) {
+            skip = period / framePeriod;
+        } else {
+            skip = 1;
+        }
+    } else {
+        skip = 1;
+    }
+
+    LOG_FUNCTION_NAME_EXIT;
 
     return NO_ERROR;
 }
@@ -3318,7 +3401,7 @@ bool OMXCameraAdapter::CommandHandler::Handler()
         switch ( msg.command ) {
             case CommandHandler::CAMERA_START_IMAGE_CAPTURE:
             {
-                stat = mCameraAdapter->startImageCapture();
+                stat = mCameraAdapter->startImageCapture(false);
                 break;
             }
             case CommandHandler::CAMERA_PERFORM_AUTOFOCUS:
@@ -3385,7 +3468,7 @@ OMX_OTHER_EXTRADATATYPE *OMXCameraAdapter::getExtradata(OMX_OTHER_EXTRADATATYPE 
 {
   if ( NULL != extraData )
       {
-      while ( extraData->nDataSize != 0 )
+      while ( extraData->eType && extraData->nDataSize && extraData->data )
           {
           if ( type == extraData->eType )
               {
@@ -3398,15 +3481,18 @@ OMX_OTHER_EXTRADATATYPE *OMXCameraAdapter::getExtradata(OMX_OTHER_EXTRADATATYPE 
   return NULL;
 }
 
-OMXCameraAdapter::OMXCameraAdapter(size_t sensor_index): mComponentState (OMX_StateLoaded)
+OMXCameraAdapter::OMXCameraAdapter(size_t sensor_index)
 {
     LOG_FUNCTION_NAME;
 
+    mOmxInitialized = false;
+    mComponentState = OMX_StateInvalid;
     mSensorIndex = sensor_index;
     mPictureRotation = 0;
     // Initial values
     mTimeSourceDelta = 0;
     onlyOnce = true;
+    mDccData.pData = NULL;
 
     mDoAFSem.Create(0);
     mInitSem.Create(0);
@@ -3441,22 +3527,23 @@ OMXCameraAdapter::~OMXCameraAdapter()
 
     Mutex::Autolock lock(gAdapterLock);
 
-    //Return to OMX Loaded state
-    switchToLoaded();
+    if ( mOmxInitialized ) {
+        // return to OMX Loaded state
+        switchToLoaded();
 
-    ///De-init the OMX
-    if( (mComponentState==OMX_StateLoaded) || (mComponentState==OMX_StateInvalid))
-        {
-        ///Free the handle for the Camera component
-        if(mCameraAdapterParameters.mHandleComp)
-            {
-            OMX_FreeHandle(mCameraAdapterParameters.mHandleComp);
-             mCameraAdapterParameters.mHandleComp = NULL;
+        closeDccFileDataSave();
+        // deinit the OMX
+        if ( mComponentState == OMX_StateLoaded || mComponentState == OMX_StateInvalid ) {
+            // free the handle for the Camera component
+            if ( mCameraAdapterParameters.mHandleComp ) {
+                OMX_FreeHandle(mCameraAdapterParameters.mHandleComp);
+                mCameraAdapterParameters.mHandleComp = NULL;
             }
-
-        OMX_Deinit();
         }
 
+        OMX_Deinit();
+        mOmxInitialized = false;
+    }
 
     //Remove any unhandled events
     if ( !mEventSignalQ.isEmpty() )
@@ -3522,109 +3609,396 @@ extern "C" CameraAdapter* CameraAdapter_Factory(size_t sensor_index)
     return adapter;
 }
 
-OMX_ERRORTYPE OMXCameraAdapter::OMXCameraGetHandle(OMX_HANDLETYPE *handle, OMX_PTR pAppData )
+OMX_ERRORTYPE OMXCameraAdapter::OMXCameraGetHandle(OMX_HANDLETYPE *handle, OMX_PTR pAppData,
+        const OMX_CALLBACKTYPE & callbacks)
 {
     OMX_ERRORTYPE eError = OMX_ErrorUndefined;
 
-    int retries = 5;
-    while(eError!=OMX_ErrorNone && --retries>=0) {
+    for ( int i = 0; i < 5; ++i ) {
+        if ( i > 0 ) {
+            // sleep for 100 ms before next attempt
+            usleep(100000);
+        }
 
-      // Setup key parameters to send to Ducati during init
-      OMX_CALLBACKTYPE oCallbacks;
+        // setup key parameters to send to Ducati during init
+        OMX_CALLBACKTYPE oCallbacks = callbacks;
 
-      // Initialize the callback handles
-      oCallbacks.EventHandler    = android::OMXCameraAdapterEventHandler;
-      oCallbacks.EmptyBufferDone = android::OMXCameraAdapterEmptyBufferDone;
-      oCallbacks.FillBufferDone  = android::OMXCameraAdapterFillBufferDone;
+        // get handle
+        eError = OMX_GetHandle(handle, (OMX_STRING)"OMX.TI.DUCATI1.VIDEO.CAMERA", pAppData, &oCallbacks);
+        if ( eError == OMX_ErrorNone ) {
+            return OMX_ErrorNone;
+        }
 
-      // Get Handle
-      eError = OMX_GetHandle(handle, (OMX_STRING)"OMX.TI.DUCATI1.VIDEO.CAMERA", pAppData, &oCallbacks);
-      if (eError != OMX_ErrorNone) {
-        CAMHAL_LOGEB("OMX_GetHandle -0x%x", eError);
-        //Sleep for 100 mS
-        usleep(100000);
-      } else {
-        break;
-      }
+        CAMHAL_LOGEB("OMX_GetHandle() failed, error: 0x%x", eError);
     }
 
+    *handle = 0;
     return eError;
 }
 
-extern "C" int CameraAdapter_Capabilities(CameraProperties::Properties* properties_array,
-                                          const unsigned int starting_camera,
-                                          const unsigned int max_camera) {
-    int num_cameras_supported = 0;
-    CameraProperties::Properties* properties = NULL;
-    OMX_ERRORTYPE eError = OMX_ErrorNone;
-    OMX_HANDLETYPE handle = NULL;
-    OMX_TI_CAPTYPE caps;
 
+class CapabilitiesHandler
+{
+public:
+    CapabilitiesHandler()
+    {
+        mComponent = 0;
+        mIsAborted = true;
+    }
+
+    const OMX_HANDLETYPE & component() const
+    {
+        return mComponent;
+    }
+
+    OMX_HANDLETYPE & componentRef()
+    {
+        return mComponent;
+    }
+
+    status_t disableAllPorts()
+    {
+        android::AutoMutex locker(mLock);
+        CAMHAL_UNUSED(locker);
+
+        mPortsLeftToDisable = OMX_CAMERA_NUM_PORTS;
+        mIsOk = false;
+        mIsAborted = false;
+
+        CAMHAL_LOGD("Disabling ports...");
+        const OMX_ERRORTYPE sendCommandError = OMX_SendCommand(component(),
+                OMX_CommandPortDisable, OMX_ALL, 0);
+        CAMHAL_LOGD("Disabling ports... DONE");
+
+        if ( sendCommandError != OMX_ErrorNone )
+        {
+            CAMHAL_LOGE("Failed disabling all ports, error: 0x%x", sendCommandError);
+            return ErrorUtils::omxToAndroidError(sendCommandError);
+        }
+
+        CAMHAL_LOGD("Waiting for disabling all ports will be finished...");
+        const status_t waitStatus = mCondition.waitRelative(mLock, seconds_to_nanoseconds(3));
+        CAMHAL_LOGD("Waiting for disabling all ports will be finished... DONE");
+
+        if ( waitStatus != NO_ERROR )
+        {
+            CAMHAL_LOGE("Timeout triggered while waiting for all ports to be disabled");
+            return TIMED_OUT;
+        }
+
+        if ( !mIsOk )
+        {
+            CAMHAL_LOGE("Failed to disable all ports");
+            return UNKNOWN_ERROR;
+        }
+
+        // all ports have been disabled
+        mIsAborted = true;
+
+        return NO_ERROR;
+    }
+
+    status_t switchToState(OMX_STATETYPE state)
+    {
+        CAMHAL_LOGD(".");
+        android::AutoMutex locker(mLock);
+        CAMHAL_UNUSED(locker);
+        CAMHAL_LOGD(".");
+
+        mState = state;
+        mIsOk = false;
+        mIsAborted = false;
+
+        CAMHAL_LOGD("Switching to state 0x%x...", mState);
+        const OMX_ERRORTYPE switchError = OMX_SendCommand(mComponent,
+                OMX_CommandStateSet, mState, 0);
+        CAMHAL_LOGD("Switching to state 0x%x... DONE", mState);
+
+        if ( switchError != OMX_ErrorNone )
+        {
+            CAMHAL_LOGE("Failed switching to state 0x%x, error: 0x%x", mState, switchError);
+            return ErrorUtils::omxToAndroidError(switchError);
+        }
+
+        // wait for the event for 3 seconds
+        CAMHAL_LOGD("Waiting...");
+        const status_t waitStatus = mCondition.waitRelative(mLock, seconds_to_nanoseconds(3));
+        CAMHAL_LOGD("Waiting... DONE");
+
+        // disable following events
+        mIsAborted = true;
+
+        if ( waitStatus != NO_ERROR )
+        {
+            CAMHAL_LOGE("Timeout triggered while switching to state 0x%x", mState);
+            return TIMED_OUT;
+        }
+
+        // state has been switched, check whether is was Idle
+        if ( !mIsOk )
+        {
+            CAMHAL_LOGE("Switching to state 0x%x has failed", mState);
+            return UNKNOWN_ERROR;
+        }
+
+        return NO_ERROR;
+    }
+
+    status_t fetchCapabilitiesForSensor(int sensorId, CameraProperties::Properties * properties)
+    {
+        {
+            CAMHAL_LOGD("Disabling all ports...");
+            const status_t disableAllPortsError = disableAllPorts();
+            CAMHAL_LOGD("Disabling all ports... DONE");
+
+            if ( disableAllPortsError != NO_ERROR )
+            {
+                CAMHAL_LOGE("Failed to disable all ports, error: %d", disableAllPortsError);
+                return UNKNOWN_ERROR;
+            }
+        }
+
+        // sensor select
+        OMX_CONFIG_SENSORSELECTTYPE sensorSelect;
+        OMX_INIT_STRUCT_PTR (&sensorSelect, OMX_CONFIG_SENSORSELECTTYPE);
+        sensorSelect.eSensor = (OMX_SENSORSELECT)sensorId;
+
+        CAMHAL_LOGD("Selecting sensor %d...", sensorId);
+        const OMX_ERRORTYPE sensorSelectError = OMX_SetConfig(component(),
+                (OMX_INDEXTYPE)OMX_TI_IndexConfigSensorSelect, &sensorSelect);
+        CAMHAL_LOGD("Selecting sensor %d... DONE", sensorId);
+
+        if ( sensorSelectError != OMX_ErrorNone )
+        {
+            CAMHAL_LOGD("Max supported sensor number reached: %d", sensorId);
+            return BAD_VALUE;
+        }
+
+        OMX_CONFIG_CAMOPERATINGMODETYPE camMode;
+
+        OMX_INIT_STRUCT_PTR (&camMode, OMX_CONFIG_CAMOPERATINGMODETYPE);
+
+        if ( sensorId == 2 )
+        {
+            CAMHAL_LOGDA("Camera mode: STEREO");
+            camMode.eCamOperatingMode = OMX_CaptureStereoImageCapture;
+        }
+        else
+        {
+            CAMHAL_LOGDA("Camera mode: MONO");
+            camMode.eCamOperatingMode = OMX_CaptureImageHighSpeedTemporalBracketing;
+        }
+
+        const OMX_ERRORTYPE eError =  OMX_SetParameter(component(),
+                           ( OMX_INDEXTYPE ) OMX_IndexCameraOperatingMode,
+                           &camMode);
+
+        if ( OMX_ErrorNone != eError )
+        {
+            CAMHAL_LOGDB("Error while configuring camera mode in CameraAdapter_Capabilities 0x%x", eError);
+            return BAD_VALUE;
+        }
+
+        const status_t idleSwitchError = switchToState(OMX_StateIdle);
+        if ( idleSwitchError != NO_ERROR )
+        {
+            CAMHAL_LOGE("Failed to switch to Idle state, error: %d", idleSwitchError);
+            return UNKNOWN_ERROR;
+        }
+
+        // get and fill capabilities
+        OMXCameraAdapter::getCaps(sensorId, properties, component());
+
+        const status_t loadedSwitchError = switchToState(OMX_StateLoaded);
+        if ( loadedSwitchError != NO_ERROR )
+        {
+            CAMHAL_LOGE("Failed to switch to Loaded state, error: %d", loadedSwitchError);
+            return UNKNOWN_ERROR;
+        }
+
+        return NO_ERROR;
+    }
+
+public:
+    static OMX_ERRORTYPE eventCallback(const OMX_HANDLETYPE component,
+            const OMX_PTR cookie, const OMX_EVENTTYPE event, const OMX_U32 data1, const OMX_U32 data2,
+            const OMX_PTR pEventData)
+    {
+        LOG_FUNCTION_NAME;
+
+        CAMHAL_UNUSED(pEventData);
+
+        CAMHAL_LOGD("event = 0x%x", event);
+        CAMHAL_LOGD("data1 = 0x%x", data1);
+        CAMHAL_LOGD("data2 = 0x%x", data2);
+
+        CapabilitiesHandler * handler = reinterpret_cast<CapabilitiesHandler*>(cookie);
+
+        // ensure this is out component
+        if ( handler->component() != component )
+        {
+            CAMHAL_LOGE("Wrong component handle received: %p, expecting: %p",
+                        component, handler->component());
+            return OMX_ErrorBadParameter;
+        }
+
+        return handler->processEvent(event, data1, data2);
+    }
+
+    OMX_ERRORTYPE processEvent(const OMX_EVENTTYPE event, const OMX_U32 data1, const OMX_U32 data2)
+    {
+        android::AutoMutex locker(mLock);
+        CAMHAL_UNUSED(locker);
+
+        if ( mIsAborted )
+        {
+            CAMHAL_LOGE("Waiting for state switch has been aborted");
+            return OMX_ErrorNone;
+        }
+
+        switch ( event )
+        {
+        case OMX_EventCmdComplete:
+            switch ( data1 )
+            {
+            case OMX_CommandStateSet:
+                // this is our state switch command we are waiting for
+                mIsOk = static_cast<OMX_STATETYPE>(data2) == mState;
+
+                // wake up the caller
+                CAMHAL_LOGD("Waking the condition...");
+                mCondition.signal();
+                CAMHAL_LOGD("Waking the condition... DONE");
+                break;
+
+            case OMX_CommandPortDisable:
+                CAMHAL_LOGD("Decreasing disabled port count: %d", mPortsLeftToDisable);
+                mPortsLeftToDisable--;
+                if ( mPortsLeftToDisable == 0 )
+                {
+                    CAMHAL_LOGD("All ports have been disabled, waking the caller...");
+                    mIsOk = true;
+                    mCondition.signal();
+                    CAMHAL_LOGD("All ports have been disabled, waking the caller... DONE");
+                }
+                break;
+
+            default:
+                // ignore rest of the commands
+                break;
+            }
+            break;
+
+        case OMX_EventError:
+            CAMHAL_LOGE("Error event received, data1 = 0x%8x, data2 = 0x%8x", data1, data2);
+
+            // keep mIsOk in false state, indicating that request has failed
+
+            CAMHAL_LOGD("Waking the condition...");
+            mCondition.signal();
+            CAMHAL_LOGD("Waking the condition... DONE");
+            break;
+
+        default:
+            // ignore rest of the event types
+            break;
+        }
+
+        return OMX_ErrorNone;
+    }
+
+private:
+    android::Mutex mLock;
+    android::Condition mCondition;
+    OMX_HANDLETYPE mComponent;
+    OMX_STATETYPE mState;
+    bool mIsAborted;
+    bool mIsOk;
+    int mPortsLeftToDisable;
+};
+
+extern "C" status_t CameraAdapter_Capabilities(
+        CameraProperties::Properties * const properties_array,
+        const int starting_camera, const int max_camera, int & supportedCameras)
+{
     LOG_FUNCTION_NAME;
+
+    supportedCameras = 0;
+
+    int num_cameras_supported = 0;
+    OMX_ERRORTYPE eError = OMX_ErrorNone;
 
     Mutex::Autolock lock(gAdapterLock);
 
     if (!properties_array) {
         CAMHAL_LOGEB("invalid param: properties = 0x%p", properties_array);
         LOG_FUNCTION_NAME_EXIT;
-        return -EINVAL;
+        return BAD_VALUE;
     }
 
     eError = OMX_Init();
     if (eError != OMX_ErrorNone) {
       CAMHAL_LOGEB("Error OMX_Init -0x%x", eError);
-      return eError;
-    }
-
-    eError = OMXCameraAdapter::OMXCameraGetHandle(&handle);
-    if (eError != OMX_ErrorNone) {
-        CAMHAL_LOGEB("OMX_GetHandle -0x%x", eError);
-        goto EXIT;
+      return ErrorUtils::omxToAndroidError(eError);
     }
 
     // Continue selecting sensor and then querying OMX Camera for it's capabilities
     // When sensor select returns an error, we know to break and stop
     while (eError == OMX_ErrorNone &&
            (starting_camera + num_cameras_supported) < max_camera) {
-        // sensor select
-        OMX_CONFIG_SENSORSELECTTYPE sensorSelect;
-        OMX_INIT_STRUCT_PTR (&sensorSelect, OMX_CONFIG_SENSORSELECTTYPE);
-        sensorSelect.eSensor = (OMX_SENSORSELECT) num_cameras_supported;
-        eError = OMX_SetConfig(handle, ( OMX_INDEXTYPE ) OMX_TI_IndexConfigSensorSelect, &sensorSelect);
 
-        if ( OMX_ErrorNone != eError ) {
+        CapabilitiesHandler handler;
+
+        OMX_CALLBACKTYPE callbacks;
+        callbacks.EventHandler = CapabilitiesHandler::eventCallback;
+        callbacks.EmptyBufferDone = 0;
+        callbacks.FillBufferDone = 0;
+
+        eError = OMXCameraAdapter::OMXCameraGetHandle(&handler.componentRef(), &handler, callbacks);
+        if (eError != OMX_ErrorNone) {
+            CAMHAL_LOGEB("OMX_GetHandle -0x%x", eError);
+            goto EXIT;
+        }
+
+        const int sensorId = num_cameras_supported;
+        CameraProperties::Properties * properties = properties_array + starting_camera + sensorId;
+        const status_t err = handler.fetchCapabilitiesForSensor(sensorId, properties);
+
+        // clean up
+        if(handler.component()) {
+            CAMHAL_LOGD("Freeing the component...");
+            OMX_FreeHandle(handler.component());
+            CAMHAL_LOGD("Freeing the component... DONE");
+            handler.componentRef() = NULL;
+        }
+
+        if ( err != NO_ERROR )
             break;
-        }
-
-        // get and fill capabilities
-        properties = properties_array + starting_camera + num_cameras_supported;
-        OMXCameraAdapter::getCaps(properties, handle);
-
-        // need to fill facing information
-        // assume that only sensor 0 is back facing
-        if (num_cameras_supported == 0) {
-            properties->set(CameraProperties::FACING_INDEX, TICameraParameters::FACING_BACK);
-        } else {
-            properties->set(CameraProperties::FACING_INDEX, TICameraParameters::FACING_FRONT);
-        }
 
         num_cameras_supported++;
     }
 
  EXIT:
-    // clean up
-    if(handle) {
-        OMX_FreeHandle(handle);
-        handle=NULL;
-    }
+    CAMHAL_LOGD("Deinit...");
     OMX_Deinit();
+    CAMHAL_LOGD("Deinit... DONE");
+
+    if ( eError != OMX_ErrorNone )
+    {
+        CAMHAL_LOGE("Error: 0x%x", eError);
+        LOG_FUNCTION_NAME_EXIT;
+        return ErrorUtils::omxToAndroidError(eError);
+    }
+
+    supportedCameras = num_cameras_supported;
 
     LOG_FUNCTION_NAME_EXIT;
 
-    return num_cameras_supported;
+    return NO_ERROR;
 }
 
 };
 
 
 /*--------------------Camera Adapter Class ENDS here-----------------------------*/
+

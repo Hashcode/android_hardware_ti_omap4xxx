@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-
-
-#define LOG_TAG "CameraHAL"
-
 #include "BaseCameraAdapter.h"
 
 namespace android {
@@ -311,7 +307,7 @@ void BaseCameraAdapter::returnFrame(void* frameBuf, CameraFrame::FrameType frame
         //check if someone is holding this buffer
         if ( 0 == refCount )
             {
-#ifdef DEBUG_LOG
+#ifdef CAMERAHAL_DEBUG
             if(mBuffersWithDucati.indexOfKey((int)frameBuf)>=0)
                 {
                 LOGE("Buffer already with Ducati!! 0x%x", frameBuf);
@@ -658,32 +654,6 @@ status_t BaseCameraAdapter::sendCommand(CameraCommands operation, int value1, in
 
             }
 
-        case CameraAdapter::CAMERA_PREVIEW_FLUSH_BUFFERS:
-            {
-
-            if ( ret == NO_ERROR )
-                {
-                ret = setState(operation);
-                }
-
-            if ( ret == NO_ERROR )
-                {
-                ret = flushBuffers();
-                }
-
-            if ( ret == NO_ERROR )
-                {
-                ret = commitState();
-                }
-            else
-                {
-                ret |= rollbackState();
-                }
-
-            break;
-
-            }
-
         case CameraAdapter::CAMERA_START_IMAGE_CAPTURE:
             {
 
@@ -972,6 +942,51 @@ status_t BaseCameraAdapter::sendCommand(CameraCommands operation, int value1, in
 
              break;
 
+         case CameraAdapter::CAMERA_USE_BUFFERS_VIDEO_CAPTURE:
+
+             CAMHAL_LOGDA("Use buffers for video (RAW + JPEG) capture");
+             desc = ( BuffersDescriptor * ) value1;
+
+             if ( NULL == desc ) {
+                 CAMHAL_LOGEA("Invalid capture buffers!");
+                 return -EINVAL;
+             }
+
+             if ( ret == NO_ERROR ) {
+                 ret = setState(operation);
+             }
+
+             if ( ret == NO_ERROR ) {
+                 Mutex::Autolock lock(mVideoBufferLock);
+                 mVideoBuffers = (int *) desc->mBuffers;
+                 mVideoBuffersLength = desc->mLength;
+                 mVideoBuffersAvailable.clear();
+                 for ( uint32_t i = 0 ; i < desc->mMaxQueueable ; i++ ) {
+                     mVideoBuffersAvailable.add(mVideoBuffers[i], true);
+                 }
+                 // initial ref count for undeqeueued buffers is 1 since buffer provider
+                 // is still holding on to it
+                 for ( uint32_t i = desc->mMaxQueueable ; i < desc->mCount ; i++ ) {
+                     mVideoBuffersAvailable.add(mPreviewBuffers[i], 1);
+                 }
+             }
+
+             if ( NULL != desc ) {
+                 ret = useBuffers(CameraAdapter::CAMERA_VIDEO,
+                         desc->mBuffers,
+                         desc->mCount,
+                         desc->mLength,
+                         desc->mMaxQueueable);
+             }
+
+             if ( ret == NO_ERROR ) {
+                 ret = commitState();
+             } else {
+                 ret |= rollbackState();
+             }
+
+             break;
+
          case CameraAdapter::CAMERA_SWITCH_TO_EXECUTING:
            ret = switchToExecuting();
            break;
@@ -1061,7 +1076,7 @@ status_t BaseCameraAdapter::notifyShutterSubscribers()
 
     shutterEvent.mEventData.clear();
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return ret;
 }

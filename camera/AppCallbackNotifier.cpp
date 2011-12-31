@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-
-
-
-#define LOG_TAG "CameraHAL"
-
-
 #include "CameraHal.h"
 #include "VideoMetadata.h"
 #include "Encoder_libjpeg.h"
@@ -38,11 +32,23 @@ void AppCallbackNotifierEncoderCallback(void* main_jpeg,
                                         CameraFrame::FrameType type,
                                         void* cookie1,
                                         void* cookie2,
-                                        void* cookie3)
+                                        void* cookie3,
+                                        bool canceled)
 {
-    if (cookie1) {
+    if (cookie1 && !canceled) {
         AppCallbackNotifier* cb = (AppCallbackNotifier*) cookie1;
         cb->EncoderDoneCb(main_jpeg, thumb_jpeg, type, cookie2, cookie3);
+    }
+
+    if (main_jpeg) {
+        free(main_jpeg);
+    }
+
+    if (thumb_jpeg) {
+       if (((Encoder_libjpeg::params *) thumb_jpeg)->dst) {
+           free(((Encoder_libjpeg::params *) thumb_jpeg)->dst);
+       }
+       free(thumb_jpeg);
     }
 }
 
@@ -115,10 +121,12 @@ void AppCallbackNotifier::EncoderDoneCb(void* main_jpeg, void* thumb_jpeg, Camer
                   (mCameraHal->msgTypeEnabled(CAMERA_MSG_COMPRESSED_IMAGE)))
     {
         Mutex::Autolock lock(mBurstLock);
-#if 0 //TODO: enable burst mode later
+
+#if defined(OMAP_ENHANCEMENT)
         if ( mBurst )
         {
-            `(CAMERA_MSG_BURST_IMAGE, JPEGPictureMemBase, mCallbackCookie);
+            mDataCb(CAMERA_MSG_COMPRESSED_BURST_IMAGE, picture, 0, NULL, mCallbackCookie);
+
         }
         else
 #endif
@@ -129,30 +137,17 @@ void AppCallbackNotifier::EncoderDoneCb(void* main_jpeg, void* thumb_jpeg, Camer
 
  exit:
 
-    if (main_jpeg) {
-        free(main_jpeg);
-    }
-
-    if (thumb_jpeg) {
-       if (((Encoder_libjpeg::params *) thumb_jpeg)->dst) {
-           free(((Encoder_libjpeg::params *) thumb_jpeg)->dst);
-       }
-       free(thumb_jpeg);
-    }
-
-    if (encoded_mem) {
-        encoded_mem->release(encoded_mem);
-    }
-
     if (picture) {
         picture->release(picture);
     }
 
-    if (cookie2) {
-        delete (ExifElementsTable*) cookie2;
-    }
-
     if (mNotifierState == AppCallbackNotifier::NOTIFIER_STARTED) {
+        if (encoded_mem) {
+            encoded_mem->release(encoded_mem);
+        }
+        if (cookie2) {
+            delete (ExifElementsTable*) cookie2;
+        }
         encoder = gEncoderQueue.valueFor(src);
         if (encoder.get()) {
             gEncoderQueue.removeItem(src);
@@ -175,6 +170,8 @@ status_t AppCallbackNotifier::initialize()
 
     mMeasurementEnabled = false;
 
+    mNotifierState = NOTIFIER_STOPPED;
+
     ///Create the app notifier thread
     mNotificationThread = new NotificationThread(this);
     if(!mNotificationThread.get())
@@ -194,6 +191,9 @@ status_t AppCallbackNotifier::initialize()
 
     mUseMetaDataBufferMode = true;
     mRawAvailable = false;
+
+    mRecording = false;
+    mPreviewing = false;
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -285,7 +285,8 @@ bool AppCallbackNotifier::notificationThread()
         CAMHAL_LOGDA("Notification Thread received message from Camera HAL");
         shouldLive = processMessage();
         if(!shouldLive) {
-                CAMHAL_LOGDA("Notification Thread exiting.");
+          CAMHAL_LOGDA("Notification Thread exiting.");
+          return shouldLive;
         }
     }
 
@@ -360,16 +361,16 @@ void AppCallbackNotifier::notifyEvent()
                           ( NULL != mNotifyCb ) &&
                           ( mCameraHal->msgTypeEnabled(CAMERA_MSG_FOCUS) ) )
                         {
-                         mNotifyCb(CAMERA_MSG_FOCUS, true, 0, mCallbackCookie);
                          mCameraHal->disableMsgType(CAMERA_MSG_FOCUS);
+                         mNotifyCb(CAMERA_MSG_FOCUS, true, 0, mCallbackCookie);
                         }
                     else if ( focusEvtData->focusError &&
                                 ( NULL != mCameraHal ) &&
                                 ( NULL != mNotifyCb ) &&
                                 ( mCameraHal->msgTypeEnabled(CAMERA_MSG_FOCUS) ) )
                         {
-                         mNotifyCb(CAMERA_MSG_FOCUS, false, 0, mCallbackCookie);
                          mCameraHal->disableMsgType(CAMERA_MSG_FOCUS);
+                         mNotifyCb(CAMERA_MSG_FOCUS, false, 0, mCallbackCookie);
                         }
 
                     break;
@@ -451,7 +452,7 @@ static void copy2Dto1D(void *dst,
     unsigned int *y_uv = (unsigned int *)src;
 
     CAMHAL_LOGVB("copy2Dto1D() y= %p ; uv=%p.",y_uv[0], y_uv[1]);
-    CAMHAL_LOGVB("pixelFormat,= %d; offset=%d",*pixelFormat,offset);
+    CAMHAL_LOGVB("pixelFormat = %s; offset=%d",pixelFormat,offset);
 
     if (pixelFormat!=NULL) {
         if (strcmp(pixelFormat, CameraParameters::PIXEL_FORMAT_YUV422I) == 0) {
@@ -663,7 +664,7 @@ void AppCallbackNotifier::copyAndSendPreviewFrame(CameraFrame* frame, int32_t ms
 
         CAMHAL_LOGVB("%d:copy2Dto1D(%p, %p, %d, %d, %d, %d, %d,%s)",
                      __LINE__,
-                      buf,
+                      dest,
                       frame->mBuffer,
                       frame->mWidth,
                       frame->mHeight,
@@ -817,6 +818,7 @@ void AppCallbackNotifier::notifyFrame()
                     unsigned int current_snapshot = 0;
                     Encoder_libjpeg::params *main_jpeg = NULL, *tn_jpeg = NULL;
                     void* exif_data = NULL;
+                    const char *previewFormat = NULL;
                     camera_memory_t* raw_picture = mRequestMemory(-1, frame->mLength, 1, NULL);
 
                     if(raw_picture) {
@@ -869,8 +871,9 @@ void AppCallbackNotifier::notifyFrame()
 
                     tn_width = parameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH);
                     tn_height = parameters.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT);
+                    previewFormat = parameters.getPreviewFormat();
 
-                    if ((tn_width > 0) && (tn_height > 0)) {
+                    if ((tn_width > 0) && (tn_height > 0) && ( NULL != previewFormat )) {
                         tn_jpeg = (Encoder_libjpeg::params*)
                                       malloc(sizeof(Encoder_libjpeg::params));
                         // if malloc fails just keep going and encode main jpeg
@@ -885,8 +888,10 @@ void AppCallbackNotifier::notifyFrame()
                         current_snapshot = (mPreviewBufCount + MAX_BUFFERS - 1) % MAX_BUFFERS;
                         tn_jpeg->src = (uint8_t*) mPreviewBufs[current_snapshot];
                         tn_jpeg->src_size = mPreviewMemory->size / MAX_BUFFERS;
-                        tn_jpeg->dst = (uint8_t*) malloc(tn_jpeg->src_size);
-                        tn_jpeg->dst_size = tn_jpeg->src_size;
+                        tn_jpeg->dst_size = calculateBufferSize(tn_width,
+                                                                tn_height,
+                                                                previewFormat);
+                        tn_jpeg->dst = (uint8_t*) malloc(tn_jpeg->dst_size);
                         tn_jpeg->quality = tn_quality;
                         tn_jpeg->in_width = width;
                         tn_jpeg->in_height = height;
@@ -921,7 +926,7 @@ void AppCallbackNotifier::notifyFrame()
                     // who registers a raw callback should receive one
                     // as well. This is  not always the case with
                     // CameraAdapters though.
-                    if (!mRawAvailable) {
+                    if (!mCameraHal->msgTypeEnabled(CAMERA_MSG_RAW_IMAGE)) {
                         dummyRaw();
                     } else {
                         mRawAvailable = false;
@@ -930,10 +935,10 @@ void AppCallbackNotifier::notifyFrame()
 #ifdef COPY_IMAGE_BUFFER
                     {
                         Mutex::Autolock lock(mBurstLock);
-#if 0 //TODO: enable burst mode later
+#if defined(OMAP_ENHANCEMENT)
                         if ( mBurst )
                         {
-                            `(CAMERA_MSG_BURST_IMAGE, JPEGPictureMemBase, mCallbackCookie);
+                            copyAndSendPictureFrame(frame, CAMERA_MSG_COMPRESSED_BURST_IMAGE);
                         }
                         else
 #endif
@@ -1122,6 +1127,8 @@ void AppCallbackNotifier::frameCallback(CameraFrame* caFrame)
 
 void AppCallbackNotifier::flushAndReturnFrames()
 {
+    LOG_FUNCTION_NAME;
+
     TIUTILS::Message msg;
     CameraFrame *frame;
 
@@ -1351,6 +1358,44 @@ void AppCallbackNotifier::setFrameProvider(FrameNotifier *frameNotifier)
     LOG_FUNCTION_NAME_EXIT;
 }
 
+size_t AppCallbackNotifier::calculateBufferSize(size_t width, size_t height, const char *pixelFormat)
+{
+    size_t res = 0;
+
+    LOG_FUNCTION_NAME
+
+    if(strcmp(pixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV422I) == 0) {
+        res = width*height*2;
+    } else if(strcmp(pixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV420SP) == 0 ||
+           strcmp(pixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV420P) == 0) {
+        res = (width*height*3)/2;
+    } else if(strcmp(pixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_RGB565) == 0) {
+        res = width*height*2;
+    }
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return res;
+}
+
+const char* AppCallbackNotifier::getContstantForPixelFormat(const char *pixelFormat) {
+    if (!pixelFormat) {
+        // returning NV12 as default
+        return CameraParameters::PIXEL_FORMAT_YUV420SP;
+    }
+
+    if(strcmp(pixelFormat, CameraParameters::PIXEL_FORMAT_YUV422I) == 0) {
+        return CameraParameters::PIXEL_FORMAT_YUV422I;
+    } else if(strcmp(pixelFormat, CameraParameters::PIXEL_FORMAT_YUV420SP) == 0 ||
+              strcmp(pixelFormat, CameraParameters::PIXEL_FORMAT_YUV420P) == 0) {
+        return CameraParameters::PIXEL_FORMAT_YUV420SP;
+    } else if(strcmp(pixelFormat, CameraParameters::PIXEL_FORMAT_RGB565) == 0) {
+        return CameraParameters::PIXEL_FORMAT_RGB565;
+    } else {
+        // returning NV12 as default
+        return CameraParameters::PIXEL_FORMAT_YUV420SP;
+    }
+}
 status_t AppCallbackNotifier::startPreviewCallbacks(CameraParameters &params, void *buffers, uint32_t *offsets, int fd, size_t length, size_t count)
 {
     sp<MemoryHeapBase> heap;
@@ -1379,24 +1424,8 @@ status_t AppCallbackNotifier::startPreviewCallbacks(CameraParameters &params, vo
     params.getPreviewSize(&w, &h);
 
     //Get the preview pixel format
-    mPreviewPixelFormat = params.getPreviewFormat();
-
-     if(strcmp(mPreviewPixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV422I) == 0)
-        {
-        size = w*h*2;
-        mPreviewPixelFormat = CameraParameters::PIXEL_FORMAT_YUV422I;
-        }
-    else if(strcmp(mPreviewPixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV420SP) == 0 ||
-            strcmp(mPreviewPixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_YUV420P) == 0)
-        {
-        size = (w*h*3)/2;
-        mPreviewPixelFormat = CameraParameters::PIXEL_FORMAT_YUV420SP;
-        }
-    else if(strcmp(mPreviewPixelFormat, (const char *) CameraParameters::PIXEL_FORMAT_RGB565) == 0)
-        {
-        size = w*h*2;
-        mPreviewPixelFormat = CameraParameters::PIXEL_FORMAT_RGB565;
-        }
+    mPreviewPixelFormat = getContstantForPixelFormat(params.getPreviewFormat());
+    size = calculateBufferSize(w, h, mPreviewPixelFormat);
 
     mPreviewMemory = mRequestMemory(-1, size, AppCallbackNotifier::MAX_BUFFERS, NULL);
     if (!mPreviewMemory) {
@@ -1415,7 +1444,7 @@ status_t AppCallbackNotifier::startPreviewCallbacks(CameraParameters &params, vo
 
     mPreviewing = true;
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return NO_ERROR;
 }
@@ -1659,13 +1688,21 @@ status_t AppCallbackNotifier::enableMsgType(int32_t msgType)
         mFrameProvider->enableFrameNotification(CameraFrame::PREVIEW_FRAME_SYNC);
     }
 
+    if(msgType & CAMERA_MSG_RAW_IMAGE) {
+        mFrameProvider->enableFrameNotification(CameraFrame::RAW_FRAME);
+    }
+
     return NO_ERROR;
 }
 
 status_t AppCallbackNotifier::disableMsgType(int32_t msgType)
 {
-    if(!mCameraHal->msgTypeEnabled(CAMERA_MSG_PREVIEW_FRAME | CAMERA_MSG_POSTVIEW_FRAME)) {
+    if( msgType & (CAMERA_MSG_PREVIEW_FRAME | CAMERA_MSG_POSTVIEW_FRAME) ) {
         mFrameProvider->disableFrameNotification(CameraFrame::PREVIEW_FRAME_SYNC);
+    }
+
+    if(msgType & CAMERA_MSG_RAW_IMAGE) {
+        mFrameProvider->disableFrameNotification(CameraFrame::RAW_FRAME);
     }
 
     return NO_ERROR;
@@ -1732,9 +1769,20 @@ status_t AppCallbackNotifier::stop()
 
     while(!gEncoderQueue.isEmpty()) {
         sp<Encoder_libjpeg> encoder = gEncoderQueue.valueAt(0);
+        camera_memory_t* encoded_mem = NULL;
+        ExifElementsTable* exif = NULL;
+
         if(encoder.get()) {
             encoder->cancel();
-            encoder->join();
+
+            encoder->getCookies(NULL, (void**) &encoded_mem, (void**) &exif);
+            if (encoded_mem) {
+                encoded_mem->release(encoded_mem);
+            }
+            if (exif) {
+                delete exif;
+            }
+
             encoder.clear();
         }
         gEncoderQueue.removeItemsAt(0);

@@ -61,6 +61,8 @@ namespace android {
 #define MAX_JPEG_QUALITY            100
 #define EXP_BRACKET_RANGE           10
 
+#define FD_PERIOD                   400 //[ms.]
+
 #define FOCUS_DIST_SIZE             100
 #define FOCUS_DIST_BUFFER_SIZE      500
 
@@ -205,15 +207,9 @@ public:
     ///Five second timeout
     static const int CAMERA_ADAPTER_TIMEOUT = 5000*1000;
 
-    enum OMXCameraEvents
-        {
-        CAMERA_PORT_ENABLE  = 0x1,
-        CAMERA_PORT_FLUSH   = 0x2,
-        CAMERA_PORT_DISABLE = 0x4,
-        };
-
     enum CaptureMode
         {
+        INITIAL_MODE = -1,
         HIGH_SPEED = 1,
         HIGH_QUALITY = 2,
         VIDEO_MODE = 3,
@@ -236,6 +232,7 @@ public:
         CodingMPO,
         CodingRAWJPEG,
         CodingRAWMPO,
+        CodingRAWJPS,
         };
 
     enum Algorithm3A
@@ -266,6 +263,16 @@ public:
         SetRotation             = 1 << 4,
         ECaptureSettingMax,
         ECapturesettingsAll = ( ((ECaptureSettingMax -1 ) << 1) -1 ) /// all possible flags raised
+    };
+
+    enum PreviewSettingsFlags {
+        SetLDC                  = 1 << 0,
+        SetNSF                  = 1 << 1,
+        SetCapMode              = 1 << 2,
+        SetVNF                  = 1 << 3,
+        SetVSTAB                = 1 << 4,
+        EPreviewSettingMax,
+        EPreviewSettingsAll = ( ((EPreviewSettingMax -1 ) << 1) -1 ) /// all possible flags raised
     };
 
     class GPSData
@@ -328,6 +335,7 @@ public:
             OMX_S32                         mMinFrameRate;
             OMX_S32                         mMaxFrameRate;
             CameraFrame::FrameType mImageType;
+            OMX_TI_STEREOFRAMELAYOUTTYPE    mFrameLayoutType;
     };
 
     ///Context of the OMX Camera component
@@ -359,15 +367,15 @@ public:
     // API
     virtual status_t UseBuffersPreview(void* bufArr, int num);
 
-    //API to flush the buffers for preview
     status_t flushBuffers();
 
     // API
     virtual status_t setFormat(OMX_U32 port, OMXCameraPortParameters &cap);
 
     // Function to get and populate caps from handle
-    static status_t getCaps(CameraProperties::Properties* props, OMX_HANDLETYPE handle);
+    static status_t getCaps(int sensorId, CameraProperties::Properties* props, OMX_HANDLETYPE handle);
     static const char* getLUTvalue_OMXtoHAL(int OMXValue, LUTtype LUT);
+    static int getMultipleLUTvalue_OMXtoHAL(int OMXValue, LUTtype LUT, char * supported);
     static int getLUTvalue_HALtoOMX(const char * HalValue, LUTtype LUT);
 
  OMX_ERRORTYPE OMXCameraAdapterEventHandler(OMX_IN OMX_HANDLETYPE hComponent,
@@ -382,7 +390,8 @@ public:
  OMX_ERRORTYPE OMXCameraAdapterFillBufferDone(OMX_IN OMX_HANDLETYPE hComponent,
                                     OMX_IN OMX_BUFFERHEADERTYPE* pBuffHeader);
 
- static OMX_ERRORTYPE OMXCameraGetHandle(OMX_HANDLETYPE *handle, OMX_PTR pAppData=NULL);
+ static OMX_ERRORTYPE OMXCameraGetHandle(OMX_HANDLETYPE *handle, OMX_PTR pAppData,
+        const OMX_CALLBACKTYPE & callbacks);
 
 protected:
 
@@ -519,6 +528,10 @@ private:
     status_t setWhiteBalanceLock(Gen3A_settings& Gen3A);
     status_t set3ALock(OMX_BOOL toggleExp, OMX_BOOL toggleWb, OMX_BOOL toggleFocus);
 
+    //Stereo 3D
+    void setParamS3D(OMX_U32 port, const char *valstr);
+    status_t setS3DFrameLayout(OMX_U32 port) const;
+
     //API to set FrameRate using VFR interface
     status_t setVFramerate(OMX_U32 minFrameRate,OMX_U32 maxFrameRate);
 
@@ -556,6 +569,7 @@ private:
                                    size_t previewWidth,
                                    size_t previewHeight);
     void pauseFaceDetection(bool pause);
+    status_t recalculateFDSkip(uint32_t &skip, uint32_t currentFPS, uint32_t period);
 
     //3A Algorithms priority configuration
     status_t setAlgoPriority(AlgoPriority priority, Algorithm3A algo, bool enable);
@@ -564,6 +578,9 @@ private:
     status_t setSensorOverclock(bool enable);
 
     // Utility methods for OMX Capabilities
+    static bool _checkOmxTiCap(const OMX_TI_CAPTYPE & caps);
+    static bool _dumpOmxTiCap(int sensorId, const OMX_TI_CAPTYPE & caps);
+
     static status_t insertCapabilities(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t encodeSizeCap(OMX_TI_CAPRESTYPE&, const CapResolution *, size_t, char *, size_t);
     static status_t encodeISOCap(OMX_U32, const CapISO*, size_t, char*, size_t);
@@ -575,6 +592,11 @@ private:
                                          size_t,
                                          char*,
                                          size_t);
+    static status_t encodeSizeCap3D(OMX_TI_CAPRESTYPE&,
+                                    const CapResolution*,
+                                    size_t ,
+                                    char * ,
+                                    size_t);
     static status_t insertImageSizes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t insertPreviewSizes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t insertThumbSizes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
@@ -597,7 +619,17 @@ private:
     static status_t insertDefaults(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t insertLocks(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t insertAreas(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertMechanicalMisalignmentCorrection(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertCaptureModes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
     static status_t insertVideoSizes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertFacing(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertFocalLength(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertAutoConvergenceModes(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertManualConvergenceRange(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertLayout(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertVideoSnapshotSupported(CameraProperties::Properties*, OMX_TI_CAPTYPE&);
+    static status_t insertVNFSupported(CameraProperties::Properties* params, OMX_TI_CAPTYPE &caps);
+    static status_t insertVSTABSupported(CameraProperties::Properties* params, OMX_TI_CAPTYPE &caps);
 
     status_t setParametersCapture(const CameraParameters &params,
                                   BaseCameraAdapter::AdapterState state);
@@ -608,10 +640,10 @@ private:
 
     //Temporal Bracketing
     status_t doBracketing(OMX_BUFFERHEADERTYPE *pBuffHeader, CameraFrame::FrameType typeOfFrame);
-    status_t sendBracketFrames();
+    status_t sendBracketFrames(size_t &framesSent);
 
     // Image Capture Service
-    status_t startImageCapture();
+    status_t startImageCapture(bool bracketing);
     status_t disableImagePort();
 
     //Shutter callback notifications
@@ -621,6 +653,7 @@ private:
     status_t setCaptureMode(OMXCameraAdapter::CaptureMode mode);
     status_t UseBuffersCapture(void* bufArr, int num);
     status_t UseBuffersPreviewData(void* bufArr, int num);
+    status_t UseBuffersRawCapture(void* bufArr, int num);
 
     //Used for calculation of the average frame rate during preview
     status_t recalculateFPS();
@@ -634,13 +667,23 @@ private:
     status_t sendCallBacks(CameraFrame frame, OMX_IN OMX_BUFFERHEADERTYPE *pBuffHeader, unsigned int mask, OMXCameraPortParameters *port);
 
     status_t apply3Asettings( Gen3A_settings& Gen3A );
-    status_t apply3ADefaults(Gen3A_settings &Gen3A);
 
     // AutoConvergence
-    status_t setAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE pACMode, OMX_S32 pManualConverence);
-    status_t getAutoConvergence(OMX_TI_AUTOCONVERGENCEMODETYPE *pACMode, OMX_S32 *pManualConverence);
+    status_t setAutoConvergence(const char *valstr,const CameraParameters &params);
 
     OMX_OTHER_EXTRADATATYPE *getExtradata(OMX_OTHER_EXTRADATATYPE *extraData, OMX_EXTRADATATYPE type);
+
+    // Mechanical Misalignment Correction
+    status_t setMechanicalMisalignmentCorrection(const char *mode);
+
+    // DCC file data save
+    status_t initDccFileDataSave(OMX_HANDLETYPE* omxHandle, int portIndex);
+    status_t sniffDccFileDataSave(OMX_BUFFERHEADERTYPE* pBuffHeader);
+    status_t saveDccFileDataSave();
+    status_t closeDccFileDataSave();
+    status_t fseekDCCuseCasePos(FILE *pFile);
+    FILE * fopenCameraDCC(const char *dccFolderPath);
+    FILE * parseDCCsubDir(DIR *pDir, char *path);
 
     class CommandHandler : public Thread {
         public:
@@ -724,15 +767,34 @@ private:
 
     //OMX Capabilities data
     static const CapResolution mImageCapRes [];
+    static const CapResolution mImageCapResSS [];
+    static const CapResolution mImageCapResTB [];
     static const CapResolution mPreviewRes [];
+    static const CapResolution mPreviewResSS [];
+    static const CapResolution mPreviewResTB [];
+    static const CapResolution mPreviewPortraitRes [];
     static const CapResolution mThumbRes [];
     static const CapPixelformat mPixelformats [];
+    static const userToOMX_LUT mFrameLayout [];
+    static const LUTtype mLayoutLUT;
     static const CapFramerate mFramerates [];
     static const CapU32 mSensorNames[] ;
     static const CapZoom mZoomStages [];
     static const CapEVComp mEVCompRanges [];
     static const CapISO mISOStages [];
     static const CapU32Pair mVarFramerates [];
+    static const int SENSORID_IMX060;
+    static const int SENSORID_OV5650;
+    static const int SENSORID_OV5640;
+    static const int SENSORID_S5K4E1GA;
+    static const int SENSORID_S5K6A1GX03;
+    static const CapU32 mFacing [];
+    static const userToOMX_LUT mAutoConvergence [];
+    static const LUTtype mAutoConvergenceLUT;
+    static const userToOMX_LUT mMechanicalMisalignmentCorrection[];
+    static const LUTtype mMechanicalMisalignmentCorrectionLUT;
+    static const userToOMX_LUT mBracketingModes[];
+    static const LUTtype mBracketingModesLUT;
 
     // OMX Camera defaults
     static const char DEFAULT_ANTIBANDING[];
@@ -755,9 +817,13 @@ private:
     static const char DEFAULT_THUMBNAIL_SIZE[];
     static const char DEFAULT_PICTURE_FORMAT[];
     static const char DEFAULT_PICTURE_SIZE[];
+    static const char DEFAULT_PICTURE_SS_SIZE[];
+    static const char DEFAULT_PICTURE_TB_SIZE[];
     static const char DEFAULT_PREVIEW_FORMAT[];
     static const char DEFAULT_FRAMERATE[];
     static const char DEFAULT_PREVIEW_SIZE[];
+    static const char DEFAULT_PREVIEW_SS_SIZE[];
+    static const char DEFAULT_PREVIEW_TB_SIZE[];
     static const char DEFAULT_NUM_PREV_BUFS[];
     static const char DEFAULT_NUM_PIC_BUFS[];
     static const char DEFAULT_MAX_FOCUS_AREAS[];
@@ -765,7 +831,7 @@ private:
     static const char DEFAULT_SCENE_MODE[];
     static const char DEFAULT_SHARPNESS[];
     static const char DEFAULT_VSTAB[];
-    static const char DEFAULT_VSTAB_SUPPORTED[];
+    static const char DEFAULT_VNF[];
     static const char DEFAULT_WB[];
     static const char DEFAULT_ZOOM[];
     static const char DEFAULT_MAX_FD_HW_FACES[];
@@ -775,13 +841,16 @@ private:
     static const char DEFAULT_MAX_NUM_METERING_AREAS[];
     static const char DEFAULT_LOCK_SUPPORTED[];
     static const char DEFAULT_LOCK_UNSUPPORTED[];
-    static const char DEFAULT_FOCAL_LENGTH_PRIMARY[];
-    static const char DEFAULT_FOCAL_LENGTH_SECONDARY[];
     static const char DEFAULT_HOR_ANGLE[];
     static const char DEFAULT_VER_ANGLE[];
-    static const char DEFAULT_VIDEO_SNAPSHOT_SUPPORTED[];
     static const char DEFAULT_VIDEO_SIZE[];
     static const char DEFAULT_PREFERRED_PREVIEW_SIZE_FOR_VIDEO[];
+    static const char DEFAULT_SENSOR_ORIENTATION[];
+    static const char DEFAULT_FACING_SUPPORTED[];
+    static const char DEFAULT_AUTOCONVERGENCE_MODE[];
+    static const char DEFAULT_MANUAL_CONVERGENCE[];
+    static const char DEFAULT_MECHANICAL_MISALIGNMENT_CORRECTION_MODE[];
+
     static const size_t MAX_FOCUS_AREAS;
 
     OMX_VERSIONTYPE mCompRevision;
@@ -798,6 +867,10 @@ private:
     // Current Focus areas
     Vector< sp<CameraArea> > mFocusAreas;
     mutable Mutex mFocusAreasLock;
+
+    // Current Touch convergence areas
+    Vector< sp<CameraArea> > mTouchAreas;
+    mutable Mutex mTouchAreasLock;
 
     // Current Metering areas
     Vector< sp<CameraArea> > mMeteringAreas;
@@ -817,6 +890,7 @@ private:
     //Face detection status
     bool mFaceDetectionRunning;
     bool mFaceDetectionPaused;
+    uint32_t mFDSkip;
 
     camera_face_t  faceDetectionLastOutput [MAX_NUM_FACES_SUPPORTED];
     int faceDetectionNumFacesLastOutput;
@@ -873,16 +947,19 @@ private:
     int mSnapshotCount;
     bool mCaptureConfigured;
     unsigned int mPendingCaptureSettings;
+    unsigned int mPendingPreviewSettings;
 
     //Temporal bracketing management data
+    bool mBracketingSet;
     mutable Mutex mBracketingLock;
     bool *mBracketingBuffersQueued;
     int mBracketingBuffersQueuedCount;
     int mLastBracetingBufferIdx;
     bool mBracketingEnabled;
-    int mBracketingRange;
+    size_t mBracketingRange;
 
     CameraParameters mParameters;
+    bool mOmxInitialized;
     OMXCameraAdapterComponentContext mCameraAdapterParameters;
     bool mFirstTimeInit;
 
@@ -939,7 +1016,10 @@ private:
     OMX_BOOL mUserSetExpLock;
     OMX_BOOL mUserSetWbLock;
 
+    bool mRawCapture;
+
+    OMX_TI_DCCDATATYPE mDccData;
+    Mutex mDccDataLock;
 };
 }; //// namespace
 #endif //OMX_CAMERA_ADAPTER_H
-

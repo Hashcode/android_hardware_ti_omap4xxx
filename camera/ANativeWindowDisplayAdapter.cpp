@@ -14,11 +14,6 @@
  * limitations under the License.
  */
 
-
-
-
-#define LOG_TAG "CameraHAL"
-
 #include "ANativeWindowDisplayAdapter.h"
 #include <OMX_IVCommon.h>
 #include <ui/GraphicBuffer.h>
@@ -177,8 +172,8 @@ ANativeWindowDisplayAdapter::ANativeWindowDisplayAdapter():mDisplayThread(NULL),
     mFailedDQs = 0;
 
     mPaused = false;
-    mXOff = 0;
-    mYOff = 0;
+    mXOff = -1;
+    mYOff = -1;
     mFirstInit = false;
 
     mFD = -1;
@@ -267,6 +262,10 @@ int ANativeWindowDisplayAdapter::setPreviewWindow(preview_stream_ops_t* window)
         CAMHAL_LOGEA("NULL window object passed to DisplayAdapter");
         LOG_FUNCTION_NAME_EXIT;
         return BAD_VALUE;
+    }
+
+    if ( window == mANativeWindow ) {
+        return ALREADY_EXISTS;
     }
 
     ///Destroy the existing window object, if it exists
@@ -454,8 +453,8 @@ int ANativeWindowDisplayAdapter::disableDisplay(bool cancel_buffer)
         mDisplayEnabled = false;
 
         ///Reset the offset values
-        mXOff = 0;
-        mYOff = 0;
+        mXOff = -1;
+        mYOff = -1;
 
         ///Reset the frame width and height values
         mFrameWidth =0;
@@ -810,6 +809,12 @@ status_t ANativeWindowDisplayAdapter::returnBuffersToWindow()
          for(unsigned int i = 0; i < mFramesWithCameraAdapterMap.size(); i++) {
              int value = mFramesWithCameraAdapterMap.valueAt(i);
 
+             // if buffer index is out of bounds skip
+             if ((value < 0) || (value >= mBufferCount)) {
+                 CAMHAL_LOGEA("Potential out bounds access to handle...skipping");
+                 continue;
+             }
+
              // unlock buffer before giving it up
              mapper.unlock((buffer_handle_t) mGrallocHandleMap[value]);
 
@@ -982,6 +987,12 @@ bool ANativeWindowDisplayAdapter::processHalMsg()
             ///mOverlay->setParameter("enabled", false);
             CAMHAL_LOGDA("Display thread received DISPLAY_STOP command from Camera HAL");
             mDisplayState = ANativeWindowDisplayAdapter::DISPLAY_STOPPED;
+
+            // flush frame message queue
+            while ( !mDisplayQ.isEmpty() ) {
+                TIUTILS::Message message;
+                mDisplayQ.get(&message);
+            }
 
             break;
 

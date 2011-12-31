@@ -21,10 +21,6 @@
 *
 */
 
-#undef LOG_TAG
-
-#define LOG_TAG "CameraHAL"
-
 #include "CameraHal.h"
 #include "OMXCameraAdapter.h"
 
@@ -173,7 +169,6 @@ status_t OMXCameraAdapter::setFaceDetection(bool enable, OMX_U32 orientation)
         OMX_INIT_STRUCT_PTR (&extraDataControl, OMX_CONFIG_EXTRADATATYPE);
         extraDataControl.nPortIndex = mCameraAdapterParameters.mPrevPortIndex;
         extraDataControl.eExtraDataType = OMX_FaceDetection;
-        extraDataControl.eCameraView = OMX_2D;
         if  ( enable )
             {
             extraDataControl.bEnable = OMX_TRUE;
@@ -248,7 +243,7 @@ status_t OMXCameraAdapter::detectFaces(OMX_BUFFERHEADERTYPE* pBuffHeader,
             CAMHAL_LOGEB("OMX_TI_PLATFORMPRIVATE size mismatch: expected = %d, received = %d",
                          ( unsigned int ) sizeof(OMX_TI_PLATFORMPRIVATE),
                          ( unsigned int ) platformPrivate->nSize);
-            ret = -EINVAL;
+            return -EINVAL;
         }
     }  else {
         CAMHAL_LOGEA("Invalid OMX_TI_PLATFORMPRIVATE");
@@ -330,8 +325,6 @@ status_t OMXCameraAdapter::encodeFaceCoordinates(const OMX_FACEDETECTIONTYPE *fa
         CAMHAL_LOGEA("Invalid OMX_FACEDETECTIONTYPE parameter");
         return EINVAL;
     }
-
-    LOG_FUNCTION_NAME
 
     hRange = CameraFDResult::RIGHT - CameraFDResult::LEFT;
     vRange = CameraFDResult::BOTTOM - CameraFDResult::TOP;

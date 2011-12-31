@@ -36,9 +36,12 @@
 #define KEY_STEREO_CAMERA "s3d-supported"
 #define KEY_EXIF_MODEL "exif-model"
 #define KEY_EXIF_MAKE "exif-make"
+#define KEY_AF_TIMEOUT "af-timeout"
 
 #define KEY_AUTO_EXPOSURE_LOCK "auto-exposure-lock"
 #define KEY_AUTO_WHITEBALANCE_LOCK "auto-whitebalance-lock"
+
+#define KEY_MECHANICAL_MISALIGNMENT_CORRECTION "mechanical-misalignment-correction"
 
 #define SDCARD_PATH "/sdcard/"
 
@@ -51,6 +54,7 @@
 #define KEY_METERING_MODE   "meter-mode"
 
 #define TEST_FOCUS_AREA "(0,0,1000,1000,300),(-1000,-1000,1000,1000,300),(0,0,0,0,0)"
+#define TEST_METERING_AREA "(0,0,1000,1000,300),(-1000,-1000,1000,1000,300)"
 
 #define COMPENSATION_OFFSET 20
 #define DELIMITER           "|"
@@ -60,6 +64,10 @@
 
 #define MODEL "camera_test"
 #define MAKE "camera_test"
+
+#define BLAZE 0
+#define BLAZE_TABLET1 1
+#define BLAZE_TABLET2 2
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 

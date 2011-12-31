@@ -21,8 +21,6 @@
 *
 */
 
-#define LOG_TAG "CameraHAL"
-
 #include "CameraHal.h"
 #include "ANativeWindowDisplayAdapter.h"
 #include "TICameraParameters.h"
@@ -44,6 +42,7 @@ extern "C" CameraAdapter* CameraAdapter_Factory(size_t);
 
 const int CameraHal::NO_BUFFERS_PREVIEW = MAX_CAMERA_BUFFERS;
 const int CameraHal::NO_BUFFERS_IMAGE_CAPTURE = 2;
+const int CameraHal::SW_SCALING_FPS_LIMIT = 15;
 
 const uint32_t MessageNotifier::EVENT_BIT_FIELD_POSITION = 0;
 const uint32_t MessageNotifier::FRAME_BIT_FIELD_POSITION = 0;
@@ -220,7 +219,7 @@ int CameraHal::msgTypeEnabled(int32_t msgType)
 int CameraHal::setParameters(const char* parameters)
 {
 
-   LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME;
 
     CameraParameters params;
 
@@ -243,10 +242,9 @@ int CameraHal::setParameters(const char* parameters)
 int CameraHal::setParameters(const CameraParameters& params)
 {
 
-   LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME;
 
     int w, h;
-    int w_orig, h_orig;
     int framerate,minframerate;
     int maxFPS, minFPS;
     int error;
@@ -254,7 +252,6 @@ int CameraHal::setParameters(const CameraParameters& params)
     const char *valstr = NULL;
     const char *prevFormat;
     char *af_coord;
-    TIUTILS::Message msg;
     status_t ret = NO_ERROR;
     // Needed for KEY_RECORDING_HINT
     bool restartPreviewRequired = false;
@@ -269,25 +266,30 @@ int CameraHal::setParameters(const CameraParameters& params)
         ///Ensure that preview is not enabled when the below parameters are changed.
         if(!previewEnabled())
             {
-
-            CAMHAL_LOGDB("PreviewFormat %s", params.getPreviewFormat());
-
             if ((valstr = params.getPreviewFormat()) != NULL) {
                 if ( isParameterValid(valstr, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FORMATS))) {
                     mParameters.setPreviewFormat(valstr);
+                    CAMHAL_LOGDB("PreviewFormat set %s", valstr);
                 } else {
-                    CAMHAL_LOGEB("Invalid preview format.Supported: %s",  mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FORMATS));
+                    CAMHAL_LOGEB("Invalid preview format: %s. Supported: %s", valstr,
+                        mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FORMATS));
                     return -EINVAL;
                 }
             }
 
-            if ((valstr = params.get(TICameraParameters::KEY_VNF)) != NULL) {
-                if ( (params.getInt(TICameraParameters::KEY_VNF)==0) || (params.getInt(TICameraParameters::KEY_VNF)==1) ) {
-                    CAMHAL_LOGDB("VNF set %s", params.get(TICameraParameters::KEY_VNF));
-                    mParameters.set(TICameraParameters::KEY_VNF, valstr);
-                } else {
+            if ((valstr = params.get(TICameraParameters::KEY_VNF_SUPPORTED)) != NULL) {
+                if (strcmp(mCameraProperties->get(CameraProperties::VNF_SUPPORTED),
+                           CameraParameters::TRUE) == 0) {
+                    CAMHAL_LOGDB("VNF %s",
+                                  params.get(TICameraParameters::KEY_VNF));
+                    mParameters.set(TICameraParameters::KEY_VNF,
+                                    params.get(TICameraParameters::KEY_VNF));
+                } else if (strcmp(valstr, CameraParameters::TRUE) == 0) {
                     CAMHAL_LOGEB("ERROR: Invalid VNF: %s", valstr);
                     ret = -EINVAL;
+                } else {
+                    mParameters.set(TICameraParameters::KEY_VNF,
+                                    CameraParameters::FALSE);
                 }
             }
 
@@ -325,70 +327,57 @@ int CameraHal::setParameters(const CameraParameters& params)
                 }
             }
 
-            if((valstr = params.get(TICameraParameters::KEY_S3D2D_PREVIEW)) != NULL)
-                {
-                CAMHAL_LOGDB("Stereo 3D->2D Preview mode is %s", params.get(TICameraParameters::KEY_S3D2D_PREVIEW));
-                mParameters.set(TICameraParameters::KEY_S3D2D_PREVIEW, valstr);
-                }
-
-            if((valstr = params.get(TICameraParameters::KEY_AUTOCONVERGENCE)) != NULL)
-                {
-                CAMHAL_LOGDB("AutoConvergence mode is %s", params.get(TICameraParameters::KEY_AUTOCONVERGENCE));
-                mParameters.set(TICameraParameters::KEY_AUTOCONVERGENCE, valstr);
-                }
-
             }
 
-            params.getPreviewSize(&w, &h);
-            if (w == -1 && h == -1) {
-                CAMHAL_LOGEA("Unable to get preview size");
-                return -EINVAL;
-              }
-
-            int oldWidth, oldHeight;
-            mParameters.getPreviewSize(&oldWidth, &oldHeight);
-
-            int orientation =0;
-            if((valstr = params.get(TICameraParameters::KEY_SENSOR_ORIENTATION)) != NULL)
+        if ( (valstr = params.get(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT)) != NULL )
+            {
+            if (strcmp(valstr, mParameters.get(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT)))
                 {
-                CAMHAL_LOGDB("Sensor Orientation is set to %s", params.get(TICameraParameters::KEY_SENSOR_ORIENTATION));
-                mParameters.set(TICameraParameters::KEY_SENSOR_ORIENTATION, valstr);
-                orientation = params.getInt(TICameraParameters::KEY_SENSOR_ORIENTATION);
+                CAMHAL_LOGDB("Stereo 3D preview image layout is %s", valstr);
+                mParameters.set(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT, valstr);
+                restartPreviewRequired = true;
                 }
+            }
 
-            if(orientation ==90 || orientation ==270)
-           {
-              if ( !isResolutionValid(h,w, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIZES)))
-               {
-                CAMHAL_LOGEB("Invalid preview resolution %d x %d", w, h);
-                return -EINVAL;
-               }
-              else
-              {
-                mParameters.setPreviewSize(w, h);
-                mVideoWidth = w;
-                mVideoHeight = h;
-               }
-           }
-           else
-           {
-            if ( !isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIZES)))
-                {
-                CAMHAL_LOGEB("Invalid preview resolution %d x %d", w, h);
-                return -EINVAL;
-                }
-            else
-                {
-                mParameters.setPreviewSize(w, h);
-                }
-           }
+        params.getPreviewSize(&w, &h);
+        if (w == -1 && h == -1) {
+            CAMHAL_LOGEA("Unable to get preview size");
+            return -EINVAL;
+        }
 
-            if ( ( oldWidth != w ) || ( oldHeight != h ) )
-                {
-                restartPreviewRequired |= true;
-                }
+        int oldWidth, oldHeight;
+        mParameters.getPreviewSize(&oldWidth, &oldHeight);
 
-            CAMHAL_LOGDB("PreviewResolution by App %d x %d", w, h);
+        int orientation =0;
+        if((valstr = params.get(TICameraParameters::KEY_SENSOR_ORIENTATION)) != NULL)
+            {
+            doesSetParameterNeedUpdate(valstr,
+                                       mParameters.get(TICameraParameters::KEY_SENSOR_ORIENTATION),
+                                       updateRequired);
+            CAMHAL_LOGDB("Sensor Orientation is set to %s", params.get(TICameraParameters::KEY_SENSOR_ORIENTATION));
+
+            mParameters.set(TICameraParameters::KEY_SENSOR_ORIENTATION, valstr);
+            orientation = params.getInt(TICameraParameters::KEY_SENSOR_ORIENTATION);
+            }
+
+        if ( (!isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIZES)))
+            && (!isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES)))
+            && (!isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_TOPBOTTOM_SIZES))) )
+            {
+            CAMHAL_LOGEB("Invalid preview resolution %d x %d", w, h);
+            return -EINVAL;
+            }
+        else
+            {
+            mParameters.setPreviewSize(w, h);
+            }
+
+        if ( ( oldWidth != w ) || ( oldHeight != h ) )
+            {
+            restartPreviewRequired |= true;
+            }
+
+        CAMHAL_LOGDB("PreviewResolution by App %d x %d", w, h);
 
         // Handle RECORDING_HINT to Set/Reset Video Mode Parameters
         valstr = params.get(CameraParameters::KEY_RECORDING_HINT);
@@ -408,14 +397,9 @@ int CameraHal::setParameters(const CameraParameters& params)
                 mVideoHeight = h;
                 CAMHAL_LOGVB("%s Video Width=%d Height=%d\n", __FUNCTION__, mVideoWidth, mVideoHeight);
 
-                setPreferredPreviewRes(w, h);
+                restartPreviewRequired = setPreferredPreviewRes(params, w, h);
                 mParameters.getPreviewSize(&w, &h);
                 CAMHAL_LOGVB("%s Preview Width=%d Height=%d\n", __FUNCTION__, w, h);
-                //Avoid restarting preview for MMS HACK
-                if ((w != mVideoWidth) && (h != mVideoHeight))
-                    {
-                    restartPreviewRequired = false;
-                    }
 
                 restartPreviewRequired |= setVideoModeParameters(params);
                 }
@@ -446,7 +430,7 @@ int CameraHal::setParameters(const CameraParameters& params)
 
         if ((valstr = params.get(CameraParameters::KEY_FOCUS_MODE)) != NULL) {
             if (isParameterValid(valstr, mCameraProperties->get(CameraProperties::SUPPORTED_FOCUS_MODES))) {
-                CAMHAL_LOGDB("Focus mode set %s", params.get(CameraParameters::KEY_FOCUS_MODE));
+                CAMHAL_LOGDB("Focus mode set %s", valstr);
 
                 // we need to take a decision on the capture mode based on whether CAF picture or
                 // video is chosen so the behavior of each is consistent to the application
@@ -471,13 +455,37 @@ int CameraHal::setParameters(const CameraParameters& params)
                 CAMHAL_LOGEB("ERROR: Invalid picture format: %s",valstr);
                 ret = -EINVAL;
             }
+        }
+
+        if ( 0 == strcmp (valstr, TICameraParameters::PIXEL_FORMAT_RAW) ||
+                0 == strcmp (valstr, TICameraParameters::PIXEL_FORMAT_RAW_JPEG) ||
+                0 == strcmp (valstr, TICameraParameters::PIXEL_FORMAT_RAW_JPS) ||
+                0 == strcmp (valstr, TICameraParameters::PIXEL_FORMAT_RAW_MPO) ) {
+
+            mRawCapture = true; // RawCapture flag
+
+            if ( (valstr = params.get(TICameraParameters::KEY_FILENAME_TIMESTAMP)) != NULL ) {
+                CAMHAL_LOGEB("FILENAME TIMESTAMP Value = %s", valstr);
+                mParameters.set(TICameraParameters::KEY_FILENAME_TIMESTAMP, valstr);
+            }
+
+        } else {
+            mRawCapture = false;
+        }
+
+        if ( (valstr = params.get(TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT)) != NULL )
+            {
+            CAMHAL_LOGDB("Stereo 3D capture image layout is %s", valstr);
+            mParameters.set(TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT, valstr);
             }
 
         params.getPictureSize(&w, &h);
-        if ( isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_SIZES))) {
+        if ( (isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_SIZES)))
+            || (isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_TOPBOTTOM_SIZES)))
+            || (isResolutionValid(w, h, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_SIDEBYSIDE_SIZES))) ) {
             mParameters.setPictureSize(w, h);
         } else {
-            CAMHAL_LOGEB("ERROR: Invalid picture resolution %dx%d", w, h);
+            CAMHAL_LOGEB("ERROR: Invalid picture resolution %d x %d", w, h);
             ret = -EINVAL;
         }
 
@@ -505,19 +513,23 @@ int CameraHal::setParameters(const CameraParameters& params)
 
         //Perform parameter validation
         if(!isParameterValid(valstr
-                        , mCameraProperties->get(CameraProperties::FRAMERATE_RANGE_SUPPORTED))
-                        || !isParameterValid(framerate,
-                                      mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FRAME_RATES)))
+                        , mCameraProperties->get(CameraProperties::FRAMERATE_RANGE_SUPPORTED)))
         {
-            CAMHAL_LOGEA("Invalid frame rate range or frame rate");
-            return -EINVAL;
+            CAMHAL_LOGDA(" FPS Range is invalid. Ckeck the Frame Rate param ");
+            if(!isParameterValid(framerate,
+                                      mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FRAME_RATES)))
+            {
+                CAMHAL_LOGEA("Invalid frame rate ");
+                return -EINVAL;
+            }
         }
 
         // Variable framerate ranges have higher priority over
         // deprecated constant FPS. "KEY_PREVIEW_FPS_RANGE" should
         // be cleared by the client in order for constant FPS to get
         // applied.
-        if ( strcmp(valstr, mCameraProperties->get(CameraProperties::FRAMERATE_RANGE))  != 0)
+        // If Port FPS needs to be used for configuring , then FPS RANGE should not be set by the APP.
+        if ( valstr != NULL)
           {
             // APP wants to set FPS range
             //Set framerate = MAXFPS
@@ -534,7 +546,7 @@ int CameraHal::setParameters(const CameraParameters& params)
 
           }
         else
-          {
+        {
               if ( framerate != atoi(mCameraProperties->get(CameraProperties::PREVIEW_FRAME_RATE)) )
               {
 
@@ -559,7 +571,7 @@ int CameraHal::setParameters(const CameraParameters& params)
                     framerate = maxFPS / CameraHal::VFR_SCALE;
                 }
 
-          }
+        }
 
         CAMHAL_LOGDB("FPS Range = %s", valstr);
         CAMHAL_LOGDB("DEFAULT FPS Range = %s", mCameraProperties->get(CameraProperties::FRAMERATE_RANGE));
@@ -599,24 +611,34 @@ int CameraHal::setParameters(const CameraParameters& params)
             }
 
         ///Update the current parameter set
-        if( (valstr = params.get(TICameraParameters::KEY_AUTOCONVERGENCE)) != NULL)
+        if ( (valstr = params.get(TICameraParameters::KEY_AUTOCONVERGENCE_MODE)) != NULL )
             {
-            CAMHAL_LOGDB("AutoConvergence Mode is set = %s", params.get(TICameraParameters::KEY_AUTOCONVERGENCE));
-            mParameters.set(TICameraParameters::KEY_AUTOCONVERGENCE, valstr);
-            }
+            CAMHAL_LOGDB("AutoConvergence mode set = %s", valstr);
+            mParameters.set(TICameraParameters::KEY_AUTOCONVERGENCE_MODE, valstr);
+             }
 
-        if( (valstr = params.get(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES)) !=NULL )
+        if ( (valstr = params.get(TICameraParameters::KEY_MANUAL_CONVERGENCE)) != NULL )
             {
-            CAMHAL_LOGDB("ManualConvergence Value = %s", params.get(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES));
-            mParameters.set(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES, valstr);
+            CAMHAL_LOGDB("ManualConvergence Value = %s", valstr);
+            mParameters.set(TICameraParameters::KEY_MANUAL_CONVERGENCE, valstr);
+             }
+
+        if((valstr = params.get(TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION)) != NULL) {
+            if (isParameterValid(valstr,
+                    mCameraProperties->get(CameraProperties::MECHANICAL_MISALIGNMENT_CORRECTION_VALUES))) {
+                CAMHAL_LOGDB("Mechanical Mialignment Correction is %s", valstr);
+                mParameters.set(TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION, valstr);
+            } else {
+                mParameters.remove(TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION);
             }
+        }
 
         if ((valstr = params.get(TICameraParameters::KEY_EXPOSURE_MODE)) != NULL) {
             if (isParameterValid(valstr, mCameraProperties->get(CameraProperties::SUPPORTED_EXPOSURE_MODES))) {
                 CAMHAL_LOGDB("Exposure set = %s", valstr);
                 mParameters.set(TICameraParameters::KEY_EXPOSURE_MODE, valstr);
             } else {
-                CAMHAL_LOGEB("ERROR: Invalid Exposure  = %s", valstr);
+                CAMHAL_LOGEB("ERROR: Invalid Exposure = %s", valstr);
                 ret = -EINVAL;
             }
         }
@@ -693,7 +715,7 @@ int CameraHal::setParameters(const CameraParameters& params)
 
         if( (valstr = params.get(CameraParameters::KEY_FOCUS_AREAS)) != NULL )
             {
-            CAMHAL_LOGI("Focus areas position set %s", params.get(CameraParameters::KEY_FOCUS_AREAS));
+            CAMHAL_LOGDB("Focus areas position set %s", params.get(CameraParameters::KEY_FOCUS_AREAS));
             mParameters.set(CameraParameters::KEY_FOCUS_AREAS, valstr);
             }
 
@@ -910,19 +932,21 @@ int CameraHal::setParameters(const CameraParameters& params)
           }
         if( (valstr = params.get(CameraParameters::KEY_METERING_AREAS)) != NULL )
             {
-            CAMHAL_LOGI("Metering areas position set %s", params.get(CameraParameters::KEY_METERING_AREAS));
+            CAMHAL_LOGDB("Metering areas position set %s", params.get(CameraParameters::KEY_METERING_AREAS));
             mParameters.set(CameraParameters::KEY_METERING_AREAS, valstr);
             }
 
-        CameraParameters adapterParams = mParameters;
-
-        // Only send parameters to adapter if preview is already
-        // enabled or doesSetParameterNeedUpdate says so. Initial setParameters to camera adapter,
-        // will be called in startPreview()
-        // TODO(XXX): Need to identify other parameters that need update from camera adapter
-        if ( (NULL != mCameraAdapter) && (mPreviewEnabled || updateRequired) ) {
-            ret |= mCameraAdapter->setParameters(adapterParams);
+        if( (valstr = params.get(TICameraParameters::RAW_WIDTH)) != NULL ) {
+            CAMHAL_LOGDB("Raw image width set %s", params.get(TICameraParameters::RAW_WIDTH));
+            mParameters.set(TICameraParameters::RAW_WIDTH, valstr);
         }
+
+        if( (valstr = params.get(TICameraParameters::RAW_HEIGHT)) != NULL ) {
+            CAMHAL_LOGDB("Raw image height set %s", params.get(TICameraParameters::RAW_HEIGHT));
+            mParameters.set(TICameraParameters::RAW_HEIGHT, valstr);
+        }
+
+        CameraParameters adapterParams = mParameters;
 
         if( NULL != params.get(TICameraParameters::KEY_TEMP_BRACKETING_RANGE_POS) )
             {
@@ -946,41 +970,48 @@ int CameraHal::setParameters(const CameraParameters& params)
         CAMHAL_LOGDB("Negative bracketing range %d", mBracketRangeNegative);
 
         if( ( (valstr = params.get(TICameraParameters::KEY_TEMP_BRACKETING)) != NULL) &&
-            ( strcmp(valstr, TICameraParameters::BRACKET_ENABLE) == 0 ))
-            {
-            if ( !mBracketingEnabled )
-                {
+            ( strcmp(valstr, TICameraParameters::BRACKET_ENABLE) == 0 )) {
+            if ( !mBracketingEnabled ) {
                 CAMHAL_LOGDA("Enabling bracketing");
                 mBracketingEnabled = true;
 
                 //Wait for AF events to enable bracketing
-                if ( NULL != mCameraAdapter )
-                    {
+                if ( NULL != mCameraAdapter ) {
                     setEventProvider( CameraHalEvent::ALL_EVENTS, mCameraAdapter );
-                    }
                 }
-            else
-                {
+            } else {
                 CAMHAL_LOGDA("Bracketing already enabled");
-                }
             }
-        else if ( ( (valstr = params.get(TICameraParameters::KEY_TEMP_BRACKETING)) != NULL ) &&
-            ( strcmp(valstr, TICameraParameters::BRACKET_DISABLE) == 0 ))
-            {
+            adapterParams.set(TICameraParameters::KEY_TEMP_BRACKETING, valstr);
+            mParameters.set(TICameraParameters::KEY_TEMP_BRACKETING, valstr);
+        } else if ( ( (valstr = params.get(TICameraParameters::KEY_TEMP_BRACKETING)) != NULL ) &&
+            ( strcmp(valstr, TICameraParameters::BRACKET_DISABLE) == 0 )) {
             CAMHAL_LOGDA("Disabling bracketing");
 
+            adapterParams.set(TICameraParameters::KEY_TEMP_BRACKETING, valstr);
+            mParameters.set(TICameraParameters::KEY_TEMP_BRACKETING, valstr);
             mBracketingEnabled = false;
             stopImageBracketing();
 
             //Remove AF events subscription
-            if ( NULL != mEventProvider )
-                {
+            if ( NULL != mEventProvider ) {
                 mEventProvider->disableEventNotification( CameraHalEvent::ALL_EVENTS );
                 delete mEventProvider;
                 mEventProvider = NULL;
-                }
-
             }
+
+        } else {
+            adapterParams.remove(TICameraParameters::KEY_TEMP_BRACKETING);
+            mParameters.remove(TICameraParameters::KEY_TEMP_BRACKETING);
+        }
+
+        // Only send parameters to adapter if preview is already
+        // enabled or doesSetParameterNeedUpdate says so. Initial setParameters to camera adapter,
+        // will be called in startPreview()
+        // TODO(XXX): Need to identify other parameters that need update from camera adapter
+        if ( (NULL != mCameraAdapter) && (mPreviewEnabled || updateRequired) ) {
+            ret |= mCameraAdapter->setParameters(adapterParams);
+        }
 
         if( ( (valstr = params.get(TICameraParameters::KEY_SHUTTER_ENABLE)) != NULL ) &&
             ( strcmp(valstr, TICameraParameters::SHUTTER_ENABLE) == 0 ))
@@ -1151,7 +1182,7 @@ status_t CameraHal::allocPreviewDataBufs(size_t size, size_t bufferCount)
         mPreviewDataOffsets = NULL;
         }
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return ret;
 }
@@ -1224,7 +1255,7 @@ status_t CameraHal::allocImageBufs(unsigned int width, unsigned int height, size
         mImageOffsets = NULL;
         }
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME_EXIT;
 
     return ret;
 }
@@ -1244,14 +1275,14 @@ status_t CameraHal::allocVideoBufs(uint32_t width, uint32_t height, uint32_t buf
     buffer_handle_t *bufsArr = new buffer_handle_t [bufferCount];
 
     if (bufsArr != NULL){
-      for (int i = 0; i< bufferCount; i++){
+      for (unsigned int i = 0; i< bufferCount; i++){
         GraphicBufferAllocator &GrallocAlloc = GraphicBufferAllocator::get();
         buffer_handle_t buf;
         ret = GrallocAlloc.alloc(width, height, HAL_PIXEL_FORMAT_NV12, CAMHAL_GRALLOC_USAGE, &buf, &stride);
         if (ret != NO_ERROR){
           CAMHAL_LOGEA("Couldn't allocate video buffers using Gralloc");
           ret = -NO_MEMORY;
-          for (int j=0; j< i; j++){
+          for (unsigned int j=0; j< i; j++){
             buf = (buffer_handle_t)bufsArr[j];
             CAMHAL_LOGEB("Freeing Gralloc Buffer 0x%x", buf);
             GrallocAlloc.free(buf);
@@ -1272,9 +1303,49 @@ status_t CameraHal::allocVideoBufs(uint32_t width, uint32_t height, uint32_t buf
   }
 
  exit:
-  LOG_FUNCTION_NAME;
+  LOG_FUNCTION_NAME_EXIT;
 
   return ret;
+}
+
+status_t CameraHal::allocRawBufs(int width, int height, const char* previewFormat, int bufferCount)
+{
+   status_t ret = NO_ERROR;
+
+    LOG_FUNCTION_NAME
+
+
+    ///@todo Enhance this method allocImageBufs() to take in a flag for burst capture
+    ///Always allocate the buffers for image capture using MemoryManager
+    if (NO_ERROR == ret) {
+        if(( NULL != mVideoBufs )) {
+            ret = freeRawBufs();
+        }
+    }
+
+    if ( NO_ERROR == ret ) {
+        mVideoLength = 0;
+        mVideoLength = (((width * height * 2) + 4095)/4096)*4096;
+        mVideoBufs = (int32_t *)mMemoryManager->allocateBuffer(width, height, previewFormat, mVideoLength, bufferCount);
+
+        CAMHAL_LOGDB("Size of Video cap buffer (used for RAW capture) %d", mVideoLength);
+        if( NULL == mVideoBufs ) {
+            CAMHAL_LOGEA("Couldn't allocate Video buffers using memory manager");
+            ret = -NO_MEMORY;
+        }
+    }
+
+    if ( NO_ERROR == ret ) {
+        mVideoFd = mMemoryManager->getFd();
+        mVideoOffsets = mMemoryManager->getOffsets();
+    } else {
+        mVideoFd = -1;
+        mVideoOffsets = NULL;
+    }
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return ret;
 }
 
 void endImageCapture( void *userData)
@@ -1377,6 +1448,27 @@ status_t CameraHal::freeVideoBufs(void *bufs)
   LOG_FUNCTION_NAME_EXIT;
 
   return ret;
+}
+
+status_t CameraHal::freeRawBufs()
+{
+    status_t ret = NO_ERROR;
+
+    LOG_FUNCTION_NAME
+
+    if ( NO_ERROR == ret ) {
+        if( NULL != mVideoBufs ) {
+            ///@todo Pluralise the name of this method to freeBuffers
+            ret = mMemoryManager->freeBuffer(mVideoBufs);
+            mVideoBufs = NULL;
+        } else {
+            ret = -EINVAL;
+        }
+    }
+
+    LOG_FUNCTION_NAME_EXIT
+
+    return ret;
 }
 
 /**
@@ -1552,43 +1644,16 @@ status_t CameraHal::startPreview()
     if(mDisplayAdapter.get() != NULL)
         {
         CAMHAL_LOGDA("Enabling display");
-        bool isS3d = false;
-        DisplayAdapter::S3DParameters s3dParams;
         int width, height;
         mParameters.getPreviewSize(&width, &height);
-#if 0 //TODO: s3d is not part of bringup...will reenable
-        if ( (valstr = mParameters.get(TICameraParameters::KEY_S3D_SUPPORTED)) != NULL) {
-            isS3d = (strcmp(valstr, "true") == 0);
-        }
-        if ( (valstr = mParameters.get(TICameraParameters::KEY_S3D2D_PREVIEW)) != NULL) {
-            if (strcmp(valstr, "off") == 0)
-                {
-                CAMHAL_LOGEA("STEREO 3D->2D PREVIEW MODE IS OFF");
-                //TODO: obtain the frame packing configuration from camera or user settings
-                //once side by side configuration is supported
-                s3dParams.mode = OVERLAY_S3D_MODE_ON;
-                s3dParams.framePacking = OVERLAY_S3D_FORMAT_OVERUNDER;
-                s3dParams.order = OVERLAY_S3D_ORDER_LF;
-                s3dParams.subSampling = OVERLAY_S3D_SS_NONE;
-                }
-            else
-                {
-                CAMHAL_LOGEA("STEREO 3D->2D PREVIEW MODE IS ON");
-                s3dParams.mode = OVERLAY_S3D_MODE_OFF;
-                s3dParams.framePacking = OVERLAY_S3D_FORMAT_OVERUNDER;
-                s3dParams.order = OVERLAY_S3D_ORDER_LF;
-                s3dParams.subSampling = OVERLAY_S3D_SS_NONE;
-                }
-        }
-#endif //if 0
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 
-        ret = mDisplayAdapter->enableDisplay(width, height, &mStartPreview, isS3d ? &s3dParams : NULL);
+        ret = mDisplayAdapter->enableDisplay(width, height, &mStartPreview, NULL);
 
 #else
 
-        ret = mDisplayAdapter->enableDisplay(width, height, NULL, isS3d ? &s3dParams : NULL);
+        ret = mDisplayAdapter->enableDisplay(width, height, NULL, NULL);
 
 #endif
 
@@ -1713,12 +1778,15 @@ status_t CameraHal::setPreviewWindow(struct preview_stream_ops *window)
             // Start the preview since the window is now available
             ret = startPreview();
         }
-    }else
-    {
-        /* If mDisplayAdpater is already created. No need to do anything.
-         * We get a surface handle directly now, so we can reconfigure surface
-         * itself in DisplayAdapter if dimensions have changed
-         */
+    } else {
+        // Update the display adapter with the new window that is passed from CameraService
+        ret = mDisplayAdapter->setPreviewWindow(window);
+        if ( (NO_ERROR == ret) && previewEnabled() ) {
+            restartPreview();
+        } else if (ret == ALREADY_EXISTS) {
+            // ALREADY_EXISTS should be treated as a noop in this case
+            ret = NO_ERROR;
+        }
     }
     LOG_FUNCTION_NAME_EXIT;
 
@@ -2430,6 +2498,7 @@ status_t CameraHal::takePicture( )
     int burst;
     const char *valstr = NULL;
     unsigned int bufferCount = 1;
+    unsigned int rawBufferCount = 1;
 
     Mutex::Autolock lock(mLock);
 
@@ -2466,29 +2535,28 @@ status_t CameraHal::takePicture( )
     }
 
     if ( !mBracketingRunning )
-        {
+    {
 
          if ( NO_ERROR == ret )
             {
             burst = mParameters.getInt(TICameraParameters::KEY_BURST);
             }
 
-         //Allocate all buffers only in burst capture case
-         if ( burst > 1 )
-             {
+         if ( burst > 1 ) {
              bufferCount = CameraHal::NO_BUFFERS_IMAGE_CAPTURE;
-             if ( NULL != mAppCallbackNotifier.get() )
-                 {
+             if ( NULL != mAppCallbackNotifier.get() ) {
                  mAppCallbackNotifier->setBurst(true);
-                 }
              }
-         else
-             {
-             if ( NULL != mAppCallbackNotifier.get() )
-                 {
+         } else if ( mBracketingEnabled ) {
+             bufferCount = mBracketRangeNegative + 1;
+             if ( NULL != mAppCallbackNotifier.get() ) {
                  mAppCallbackNotifier->setBurst(false);
-                 }
              }
+         } else {
+             if ( NULL != mAppCallbackNotifier.get() ) {
+                 mAppCallbackNotifier->setBurst(false);
+             }
+         }
 
         // pause preview during normal image capture
         // do not pause preview if recording (video state)
@@ -2560,10 +2628,31 @@ status_t CameraHal::takePicture( )
             ret = mCameraAdapter->sendCommand(CameraAdapter::CAMERA_USE_BUFFERS_IMAGE_CAPTURE,
                                               ( int ) &desc);
             }
-        }
+        if (mRawCapture) {
+            if ( NO_ERROR == ret ) {
+                CAMHAL_LOGDB("Raw capture buffers setup - %s", mParameters.getPictureFormat());
+                ret = allocRawBufs(mRawWidth, mRawHeight, TICameraParameters::PIXEL_FORMAT_RAW, rawBufferCount);
 
-    if ( ( NO_ERROR == ret ) && ( NULL != mCameraAdapter ) )
-        {
+                if ( NO_ERROR != ret ) {
+                    CAMHAL_LOGEB("allocRawBufs (for RAW capture) returned error 0x%x", ret);
+                }
+            }
+
+            if ((NO_ERROR == ret) && ( NULL != mCameraAdapter )) {
+                desc.mBuffers = mVideoBufs;
+                desc.mOffsets = mVideoOffsets;
+                desc.mFd = mVideoFd;
+                desc.mLength = mVideoLength;
+                desc.mCount = ( size_t ) rawBufferCount;
+                desc.mMaxQueueable = ( size_t ) rawBufferCount;
+
+                ret = mCameraAdapter->sendCommand(CameraAdapter::CAMERA_USE_BUFFERS_VIDEO_CAPTURE,
+                        ( int ) &desc);
+            }
+        }
+    }
+
+    if ((NO_ERROR == ret) && (NULL != mCameraAdapter)) {
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 
@@ -2576,7 +2665,7 @@ status_t CameraHal::takePicture( )
 
 #endif
 
-        }
+    }
 
     return ret;
 }
@@ -2820,6 +2909,11 @@ CameraHal::CameraHal(int cameraId)
     mSensorListener = NULL;
     mVideoWidth = 0;
     mVideoHeight = 0;
+
+    //These values depends on the sensor characteristics
+    mRawWidth = 4032;
+    mRawHeight = 3024;
+    mRawCapture = false;
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 
@@ -3151,7 +3245,6 @@ status_t CameraHal::parseResolution(const char *resStr, int &width, int &height)
     status_t ret = NO_ERROR;
     char *ctx, *pWidth, *pHeight;
     const char *sep = "x";
-    char *tmp = NULL;
 
     LOG_FUNCTION_NAME;
 
@@ -3162,11 +3255,10 @@ status_t CameraHal::parseResolution(const char *resStr, int &width, int &height)
 
     //This fixes "Invalid input resolution"
     char *resStr_copy = (char *)malloc(strlen(resStr) + 1);
-    if ( NULL!=resStr_copy ) {
-    if ( NO_ERROR == ret )
+    if ( NULL != resStr_copy )
         {
         strcpy(resStr_copy, resStr);
-        pWidth = strtok_r( (char *) resStr_copy, sep, &ctx);
+        pWidth = strtok_r(resStr_copy, sep, &ctx);
 
         if ( NULL != pWidth )
             {
@@ -3194,9 +3286,9 @@ status_t CameraHal::parseResolution(const char *resStr, int &width, int &height)
             }
         }
 
-        free(resStr_copy);
-        resStr_copy = NULL;
-     }
+    free(resStr_copy);
+    resStr_copy = NULL;
+
     LOG_FUNCTION_NAME_EXIT;
 
     return ret;
@@ -3204,8 +3296,6 @@ status_t CameraHal::parseResolution(const char *resStr, int &width, int &height)
 
 void CameraHal::insertSupportedParams()
 {
-    char tmpBuffer[PARAM_BUFFER + 1];
-
     LOG_FUNCTION_NAME;
 
     CameraParameters &p = mParameters;
@@ -3219,6 +3309,10 @@ void CameraHal::insertSupportedParams()
     p.set(CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_FORMATS));
     p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIZES));
     p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FORMATS));
+    p.set(TICameraParameters::KEY_SUPPORTED_PICTURE_SIDEBYSIDE_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_SIDEBYSIDE_SIZES));
+    p.set(TICameraParameters::KEY_SUPPORTED_PICTURE_TOPBOTTOM_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_PICTURE_TOPBOTTOM_SIZES));
+    p.set(TICameraParameters::KEY_SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES));
+    p.set(TICameraParameters::KEY_SUPPORTED_PREVIEW_TOPBOTTOM_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_TOPBOTTOM_SIZES));
     p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES, mCameraProperties->get(CameraProperties::SUPPORTED_PREVIEW_FRAME_RATES));
     p.set(CameraParameters::KEY_SUPPORTED_JPEG_THUMBNAIL_SIZES, mCameraProperties->get(CameraProperties::SUPPORTED_THUMBNAIL_SIZES));
     p.set(CameraParameters::KEY_SUPPORTED_WHITE_BALANCE, mCameraProperties->get(CameraProperties::SUPPORTED_WHITE_BALANCE));
@@ -3238,17 +3332,22 @@ void CameraHal::insertSupportedParams()
     p.set(CameraParameters::KEY_ZOOM_SUPPORTED, mCameraProperties->get(CameraProperties::ZOOM_SUPPORTED));
     p.set(CameraParameters::KEY_SMOOTH_ZOOM_SUPPORTED, mCameraProperties->get(CameraProperties::SMOOTH_ZOOM_SUPPORTED));
     p.set(TICameraParameters::KEY_SUPPORTED_IPP, mCameraProperties->get(CameraProperties::SUPPORTED_IPP_MODES));
-    p.set(TICameraParameters::KEY_S3D_SUPPORTED,mCameraProperties->get(CameraProperties::S3D_SUPPORTED));
-    p.set(TICameraParameters::KEY_S3D2D_PREVIEW_MODE,mCameraProperties->get(CameraProperties::S3D2D_PREVIEW_MODES));
-    p.set(TICameraParameters::KEY_AUTOCONVERGENCE_MODE, mCameraProperties->get(CameraProperties::AUTOCONVERGENCE_MODE));
-    p.set(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES, mCameraProperties->get(CameraProperties::MANUALCONVERGENCE_VALUES));
+    p.set(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT_VALUES, mCameraProperties->get(CameraProperties::S3D_PRV_FRAME_LAYOUT_VALUES));
+    p.set(TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT_VALUES, mCameraProperties->get(CameraProperties::S3D_CAP_FRAME_LAYOUT_VALUES));
+    p.set(TICameraParameters::KEY_AUTOCONVERGENCE_MODE_VALUES, mCameraProperties->get(CameraProperties::AUTOCONVERGENCE_MODE_VALUES));
+    p.set(TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_MIN, mCameraProperties->get(CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_MIN));
+    p.set(TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_MAX, mCameraProperties->get(CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_MAX));
+    p.set(TICameraParameters::KEY_SUPPORTED_MANUAL_CONVERGENCE_STEP, mCameraProperties->get(CameraProperties::SUPPORTED_MANUAL_CONVERGENCE_STEP));
     p.set(CameraParameters::KEY_VIDEO_STABILIZATION_SUPPORTED, mCameraProperties->get(CameraProperties::VSTAB_SUPPORTED));
+    p.set(TICameraParameters::KEY_VNF_SUPPORTED, mCameraProperties->get(CameraProperties::VNF_SUPPORTED));
     p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE, mCameraProperties->get(CameraProperties::FRAMERATE_RANGE_SUPPORTED));
     p.set(TICameraParameters::KEY_SENSOR_ORIENTATION, mCameraProperties->get(CameraProperties::SENSOR_ORIENTATION));
     p.set(TICameraParameters::KEY_SENSOR_ORIENTATION_VALUES, mCameraProperties->get(CameraProperties::SENSOR_ORIENTATION_VALUES));
     p.set(CameraParameters::KEY_AUTO_EXPOSURE_LOCK_SUPPORTED, mCameraProperties->get(CameraProperties::AUTO_EXPOSURE_LOCK_SUPPORTED));
     p.set(CameraParameters::KEY_AUTO_WHITEBALANCE_LOCK_SUPPORTED, mCameraProperties->get(CameraProperties::AUTO_WHITEBALANCE_LOCK_SUPPORTED));
     p.set(CameraParameters::KEY_VIDEO_SNAPSHOT_SUPPORTED, mCameraProperties->get(CameraProperties::VIDEO_SNAPSHOT_SUPPORTED));
+    p.set(TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION_VALUES, mCameraProperties->get(CameraProperties::MECHANICAL_MISALIGNMENT_CORRECTION_VALUES));
+    p.set(TICameraParameters::KEY_CAP_MODE_VALUES, mCameraProperties->get(CameraProperties::CAP_MODE_VALUES));
 
     LOG_FUNCTION_NAME_EXIT;
 
@@ -3263,8 +3362,11 @@ void CameraHal::initDefaultParameters()
     int currentRevision, adapterRevision;
     status_t ret = NO_ERROR;
     int width, height;
+    const char *valstr;
 
     LOG_FUNCTION_NAME;
+
+    insertSupportedParams();
 
     ret = parseResolution(mCameraProperties->get(CameraProperties::PREVIEW_SIZE), width, height);
 
@@ -3301,8 +3403,6 @@ void CameraHal::initDefaultParameters()
         p.set(CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT, MIN_HEIGHT);
         }
 
-    insertSupportedParams();
-
     //Insert default values
     p.setPreviewFrameRate(atoi(mCameraProperties->get(CameraProperties::PREVIEW_FRAME_RATE)));
     p.setPreviewFormat(mCameraProperties->get(CameraProperties::PREVIEW_FORMAT));
@@ -3325,10 +3425,12 @@ void CameraHal::initDefaultParameters()
     p.set(TICameraParameters::KEY_ISO, mCameraProperties->get(CameraProperties::ISO_MODE));
     p.set(TICameraParameters::KEY_IPP, mCameraProperties->get(CameraProperties::IPP));
     p.set(TICameraParameters::KEY_GBCE, mCameraProperties->get(CameraProperties::GBCE));
-    p.set(TICameraParameters::KEY_S3D2D_PREVIEW, mCameraProperties->get(CameraProperties::S3D2D_PREVIEW));
-    p.set(TICameraParameters::KEY_AUTOCONVERGENCE, mCameraProperties->get(CameraProperties::AUTOCONVERGENCE));
-    p.set(TICameraParameters::KEY_MANUALCONVERGENCE_VALUES, mCameraProperties->get(CameraProperties::MANUALCONVERGENCE_VALUES));
+    p.set(TICameraParameters::KEY_S3D_PRV_FRAME_LAYOUT, mCameraProperties->get(CameraProperties::S3D_PRV_FRAME_LAYOUT));
+    p.set(TICameraParameters::KEY_S3D_CAP_FRAME_LAYOUT, mCameraProperties->get(CameraProperties::S3D_CAP_FRAME_LAYOUT));
+    p.set(TICameraParameters::KEY_AUTOCONVERGENCE_MODE, mCameraProperties->get(CameraProperties::AUTOCONVERGENCE_MODE));
+    p.set(TICameraParameters::KEY_MANUAL_CONVERGENCE, mCameraProperties->get(CameraProperties::MANUAL_CONVERGENCE));
     p.set(CameraParameters::KEY_VIDEO_STABILIZATION, mCameraProperties->get(CameraProperties::VSTAB));
+    p.set(TICameraParameters::KEY_VNF, mCameraProperties->get(CameraProperties::VNF));
     p.set(CameraParameters::KEY_FOCAL_LENGTH, mCameraProperties->get(CameraProperties::FOCAL_LENGTH));
     p.set(CameraParameters::KEY_HORIZONTAL_VIEW_ANGLE, mCameraProperties->get(CameraProperties::HOR_ANGLE));
     p.set(CameraParameters::KEY_VERTICAL_VIEW_ANGLE, mCameraProperties->get(CameraProperties::VER_ANGLE));
@@ -3341,14 +3443,15 @@ void CameraHal::initDefaultParameters()
     p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, "OMX_TI_COLOR_FormatYUV420PackedSemiPlanar");
     p.set(CameraParameters::KEY_MAX_NUM_DETECTED_FACES_HW, mCameraProperties->get(CameraProperties::MAX_FD_HW_FACES));
     p.set(CameraParameters::KEY_MAX_NUM_DETECTED_FACES_SW, mCameraProperties->get(CameraProperties::MAX_FD_SW_FACES));
-
+    p.set(TICameraParameters::KEY_MECHANICAL_MISALIGNMENT_CORRECTION, mCameraProperties->get(CameraProperties::MECHANICAL_MISALIGNMENT_CORRECTION));
     // Only one area a.k.a Touch AF for now.
     // TODO: Add support for multiple focus areas.
     p.set(CameraParameters::KEY_MAX_NUM_FOCUS_AREAS, mCameraProperties->get(CameraProperties::MAX_FOCUS_AREAS));
     p.set(CameraParameters::KEY_AUTO_EXPOSURE_LOCK, mCameraProperties->get(CameraProperties::AUTO_EXPOSURE_LOCK));
     p.set(CameraParameters::KEY_AUTO_WHITEBALANCE_LOCK, mCameraProperties->get(CameraProperties::AUTO_WHITEBALANCE_LOCK));
     p.set(CameraParameters::KEY_MAX_NUM_METERING_AREAS, mCameraProperties->get(CameraProperties::MAX_NUM_METERING_AREAS));
-
+    p.set(TICameraParameters::RAW_WIDTH, mRawWidth);
+    p.set(TICameraParameters::RAW_HEIGHT, mRawHeight);
     LOG_FUNCTION_NAME_EXIT;
 }
 
@@ -3475,18 +3578,70 @@ void CameraHal::selectFPSRange(int framerate, int *min_fps, int *max_fps)
 
 }
 
-void CameraHal::setPreferredPreviewRes(int width, int height)
+bool CameraHal::checkFramerateThr(const CameraParameters &params)
 {
-  LOG_FUNCTION_NAME;
+    static CameraParameters current_Params = mParameters;
+    int maxFPS, minFPS, current_maxFPS, current_minFPS;
+    int framerate, current_framerate;
+    bool ret = false;
 
-  if ( (width == 320) && (height == 240)){
-    mParameters.setPreviewSize(640,480);
-  }
-  if ( (width == 176) && (height == 144)){
-    mParameters.setPreviewSize(704,576);
-  }
+    LOG_FUNCTION_NAME;
 
-  LOG_FUNCTION_NAME_EXIT;
+    params.getPreviewFpsRange(&minFPS, &maxFPS);
+    maxFPS /= CameraHal::VFR_SCALE;
+    framerate = params.getPreviewFrameRate();
+
+    current_Params.getPreviewFpsRange(&current_minFPS, &current_maxFPS);
+    current_maxFPS /= CameraHal::VFR_SCALE;
+    current_framerate = current_Params.getPreviewFrameRate();
+
+    if ( current_framerate != framerate ) {
+        if ( ( ( current_framerate > SW_SCALING_FPS_LIMIT ) && ( framerate <= SW_SCALING_FPS_LIMIT ) ) ||
+             ( ( current_framerate <= SW_SCALING_FPS_LIMIT) && ( framerate > SW_SCALING_FPS_LIMIT) ) ) {
+            ret = true;
+        }
+    }
+
+    if ( current_maxFPS != maxFPS ) {
+        if ( ( ( current_maxFPS > SW_SCALING_FPS_LIMIT ) && ( maxFPS <= SW_SCALING_FPS_LIMIT ) ) ||
+             ( ( current_maxFPS <= SW_SCALING_FPS_LIMIT) && ( maxFPS > SW_SCALING_FPS_LIMIT) ) ) {
+            ret = true;
+        }
+    }
+
+    current_Params = params;
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return ret;
+}
+
+bool CameraHal::setPreferredPreviewRes(const CameraParameters &params, int width, int height)
+{
+    int maxFPS, minFPS, framerate;
+
+    LOG_FUNCTION_NAME;
+
+    params.getPreviewFpsRange(&minFPS, &maxFPS);
+    maxFPS /= CameraHal::VFR_SCALE;
+    framerate = params.getPreviewFrameRate();
+
+    if ( ( maxFPS > SW_SCALING_FPS_LIMIT ) ||
+         ( framerate > SW_SCALING_FPS_LIMIT ) ) {
+        mParameters.setPreviewSize(width, height);
+    } else {
+        if ( ( width == 320 ) && ( height == 240 ) ) {
+            mParameters.setPreviewSize(640, 480);
+
+        }
+        if ( ( width == 176 ) && ( height == 144 ) ) {
+            mParameters.setPreviewSize(704, 576);
+        }
+    }
+
+    LOG_FUNCTION_NAME_EXIT;
+
+    return checkFramerateThr(params);;
 }
 
 void CameraHal::resetPreviewRes(CameraParameters *mParams, int width, int height)
@@ -3501,5 +3656,3 @@ void CameraHal::resetPreviewRes(CameraParameters *mParams, int width, int height
 }
 
 };
-
-

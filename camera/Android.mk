@@ -5,6 +5,28 @@ LOCAL_PATH:= $(call my-dir)
 OMAP4_CAMERA_HAL_USES:= OMX
 # OMAP4_CAMERA_HAL_USES:= USB
 
+ifdef TI_CAMERAHAL_DEBUG_ENABLED
+    # Enable CameraHAL debug logs
+    CAMERAHAL_CFLAGS += -DCAMERAHAL_DEBUG
+endif
+
+ifdef TI_CAMERAHAL_VERBOSE_DEBUG_ENABLED
+    # Enable CameraHAL verbose debug logs
+    CAMERAHAL_CFLAGS += -DCAMERAHAL_DEBUG_VERBOSE
+endif
+
+ifdef TI_CAMERAHAL_DEBUG_FUNCTION_NAMES
+    # Enable CameraHAL function enter/exit logging
+    CAMERAHAL_CFLAGS += -DTI_UTILS_FUNCTION_LOGGER_ENABLE
+endif
+
+ifdef TI_CAMERAHAL_DEBUG_TIMESTAMPS
+    # Enable timestamp logging
+    CAMERAHAL_CFLAGS += -DTI_UTILS_DEBUG_USE_TIMESTAMPS
+endif
+
+CAMERAHAL_CFLAGS += -DLOG_TAG=\"CameraHal\"
+
 OMAP4_CAMERA_HAL_SRC := \
 	CameraHal_Module.cpp \
 	CameraHal.cpp \
@@ -34,13 +56,14 @@ OMAP4_CAMERA_OMX_SRC:= \
 	OMXCameraAdapter/OMXFD.cpp \
 	OMXCameraAdapter/OMXFocus.cpp \
 	OMXCameraAdapter/OMXZoom.cpp \
+	OMXCameraAdapter/OMXDccDataSave.cpp \
 
 OMAP4_CAMERA_USB_SRC:= \
 	BaseCameraAdapter.cpp \
 	V4LCameraAdapter/V4LCameraAdapter.cpp
 
 #
-# OMX Camera HAL 
+# OMX Camera HAL
 #
 
 ifeq ($(OMAP4_CAMERA_HAL_USES),OMX)
@@ -62,8 +85,8 @@ LOCAL_C_INCLUDES += \
     hardware/ti/omap4xxx/ion \
     frameworks/base/include/ui \
     frameworks/base/include/utils \
-    hardware/ti/omap4xxx/domx/omx_core/inc \
-    hardware/ti/omap4xxx/domx/mm_osal/inc \
+    $(DOMX_PATH)/omx_core/inc \
+    $(DOMX_PATH)/mm_osal/inc \
     frameworks/base/include/media/stagefright \
     frameworks/base/include/media/stagefright/openmax \
     external/jpeg \
@@ -84,7 +107,7 @@ LOCAL_SHARED_LIBRARIES:= \
     libjpeg \
     libexif
 
-LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER
+LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER $(CAMERAHAL_CFLAGS)
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_MODULE:= camera.$(TARGET_BOARD_PLATFORM)
@@ -127,7 +150,7 @@ LOCAL_SHARED_LIBRARIES:= \
     libcamera_client \
     libion \
 
-LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER
+LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER $(CAMERAHAL_CFLAGS)
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_MODULE:= camera.$(TARGET_BOARD_PLATFORM)
@@ -135,5 +158,5 @@ LOCAL_MODULE_TAGS:= optional
 
 include $(BUILD_HEAPTRACKED_SHARED_LIBRARY)
 endif
-endif 
+endif
 endif

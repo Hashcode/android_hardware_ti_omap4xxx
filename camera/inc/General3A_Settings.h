@@ -29,8 +29,6 @@
 #ifndef GENERAL_3A_SETTINGS_H
 #define GENERAL_3A_SETTINGS_H
 
-#define FOCUS_FACE_PRIORITY OMX_IMAGE_FocusControlMax -1
-#define FOCUS_REGION_PRIORITY OMX_IMAGE_FocusControlMax -2
 #define WB_FACE_PRIORITY OMX_WhiteBalControlMax -1
 #define EXPOSURE_FACE_PRIORITY OMX_ExposureControlMax - 1
 
@@ -77,22 +75,19 @@ const userToOMX_LUT effects_UserToOMX [] = {
 
 const userToOMX_LUT scene_UserToOMX [] = {
     { CameraParameters::SCENE_MODE_AUTO, OMX_Manual },
-    { CameraParameters::SCENE_MODE_ACTION, OMX_TI_Action },
-    { CameraParameters::SCENE_MODE_NIGHT, OMX_TI_Night },
-    { CameraParameters::SCENE_MODE_PARTY, OMX_TI_Party },
-    { CameraParameters::SCENE_MODE_SUNSET, OMX_TI_Sunset },
-/*********** TODO: These scene modes are not verified. ************
- ***************** Have to verify and reeable later. **************
-    { CameraParameters::SCENE_MODE_THEATRE, OMX_TI_Theatre },
     { CameraParameters::SCENE_MODE_LANDSCAPE, OMX_Landscape },
     { CameraParameters::SCENE_MODE_NIGHT_PORTRAIT, OMX_NightPortrait },
     { CameraParameters::SCENE_MODE_FIREWORKS, OMX_Fireworks },
+    { CameraParameters::SCENE_MODE_ACTION, OMX_TI_Action },
     { CameraParameters::SCENE_MODE_BEACH, OMX_TI_Beach },
     { CameraParameters::SCENE_MODE_CANDLELIGHT, OMX_TI_Candlelight },
+    { CameraParameters::SCENE_MODE_NIGHT, OMX_TI_Night },
+    { CameraParameters::SCENE_MODE_PARTY, OMX_TI_Party },
     { CameraParameters::SCENE_MODE_PORTRAIT, OMX_TI_Portrait },
     { CameraParameters::SCENE_MODE_SNOW, OMX_TI_Snow },
     { CameraParameters::SCENE_MODE_STEADYPHOTO, OMX_TI_Steadyphoto },
-*********************************************************************/
+    { CameraParameters::SCENE_MODE_SUNSET, OMX_TI_Sunset },
+    { CameraParameters::SCENE_MODE_THEATRE, OMX_TI_Theatre },
 #ifdef OMAP_ENHANCEMENT
     { TICameraParameters::SCENE_MODE_CLOSEUP, OMX_Closeup },
     { TICameraParameters::SCENE_MODE_AQUA, OMX_Underwater },
@@ -113,11 +108,9 @@ const userToOMX_LUT whiteBal_UserToOMX [] = {
     { CameraParameters::WHITE_BALANCE_CLOUDY_DAYLIGHT, OMX_WhiteBalControlCloudy },
     { CameraParameters::WHITE_BALANCE_FLUORESCENT, OMX_WhiteBalControlFluorescent },
     { CameraParameters::WHITE_BALANCE_INCANDESCENT, OMX_WhiteBalControlIncandescent },
-/********************** THESE ARE CURRENT NOT TUNED PROPERLY *************************
     { CameraParameters::WHITE_BALANCE_SHADE, OMX_TI_WhiteBalControlShade },
     { CameraParameters::WHITE_BALANCE_TWILIGHT, OMX_TI_WhiteBalControlTwilight },
     { CameraParameters::WHITE_BALANCE_WARM_FLUORESCENT, OMX_TI_WhiteBalControlWarmFluorescent },
-**************************************************************************************/
 #ifdef OMAP_ENHANCEMENT
     { TICameraParameters::WHITE_BALANCE_TUNGSTEN, OMX_WhiteBalControlTungsten },
     { TICameraParameters::WHITE_BALANCE_HORIZON, OMX_WhiteBalControlHorizon },
@@ -141,10 +134,11 @@ const userToOMX_LUT focus_UserToOMX [] = {
     { CameraParameters::FOCUS_MODE_CONTINUOUS_VIDEO, OMX_IMAGE_FocusControlAuto },
     { CameraParameters::FOCUS_MODE_CONTINUOUS_PICTURE, OMX_IMAGE_FocusControlAuto },
 #ifdef OMAP_ENHANCEMENT
-    { TICameraParameters::FOCUS_MODE_FACE , FOCUS_FACE_PRIORITY },
+    { TICameraParameters::FOCUS_MODE_FACE , OMX_IMAGE_FocusControlContinousFacePriority },
     { TICameraParameters::FOCUS_MODE_PORTRAIT, OMX_IMAGE_FocusControlPortrait },
     { TICameraParameters::FOCUS_MODE_EXTENDED, OMX_IMAGE_FocusControlExtended },
 #endif
+    { TICameraParameters::FOCUS_MODE_OFF , OMX_IMAGE_FocusControlOff }
 };
 
 const userToOMX_LUT exposure_UserToOMX [] = {

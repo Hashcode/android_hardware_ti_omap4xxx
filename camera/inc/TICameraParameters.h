@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-
-
-
 #ifndef TI_CAMERA_PARAMETERS_H
 #define TI_CAMERA_PARAMETERS_H
 
@@ -36,10 +33,11 @@ static const  char KEY_SUPPORTED_CAMERAS[];
 // Select logical Camera index
 static const char KEY_CAMERA[];
 static const char KEY_CAMERA_NAME[];
-static const  char KEY_S3D_SUPPORTED[];
 static const char  KEY_BURST[];
 static const  char KEY_CAP_MODE[];
+static const  char KEY_CAP_MODE_VALUES[];
 static const  char KEY_VNF[];
+static const  char KEY_VNF_SUPPORTED[];
 static const  char KEY_SATURATION[];
 static const  char KEY_BRIGHTNESS[];
 static const  char KEY_EXPOSURE_MODE[];
@@ -87,9 +85,12 @@ static const char MEASUREMENT_ENABLE[];
 static const char MEASUREMENT_DISABLE[];
 
 //  TI extensions to add values for ManualConvergence and AutoConvergence mode
-static const char KEY_AUTOCONVERGENCE[];
 static const char KEY_AUTOCONVERGENCE_MODE[];
-static const char KEY_MANUALCONVERGENCE_VALUES[];
+static const char KEY_AUTOCONVERGENCE_MODE_VALUES[];
+static const char KEY_MANUAL_CONVERGENCE[];
+static const char KEY_SUPPORTED_MANUAL_CONVERGENCE_MIN[];
+static const char KEY_SUPPORTED_MANUAL_CONVERGENCE_MAX[];
+static const char KEY_SUPPORTED_MANUAL_CONVERGENCE_STEP[];
 
 //TI extensions for enabling/disabling GLBCE
 static const char GLBCE_ENABLE[];
@@ -128,6 +129,10 @@ static const char  KEY_GPS_MAPDATUM[];
 static const char  KEY_GPS_VERSION[];
 static const char  KEY_GPS_DATESTAMP[];
 
+static const char  RAW_WIDTH[];
+static const char  RAW_HEIGHT[];
+static const char  KEY_FILENAME_TIMESTAMP[];
+
 //TI extensions for enabling/disabling shutter sound
 static const char SHUTTER_ENABLE[];
 static const char SHUTTER_DISABLE[];
@@ -147,14 +152,18 @@ static const char HIGH_PERFORMANCE_MODE[];
 static const char HIGH_QUALITY_MODE[];
 static const char HIGH_QUALITY_ZSL_MODE[];
 static const char VIDEO_MODE[];
-
+static const char EXPOSURE_BRACKETING[];
+static const char TEMP_BRACKETING[];
 
 // TI extensions to standard android pixel formats
+static const char PIXEL_FORMAT_UNUSED[];
+static const char PIXEL_FORMAT_JPEG[];
 static const char PIXEL_FORMAT_RAW[];
 static const char PIXEL_FORMAT_JPS[];
 static const char PIXEL_FORMAT_MPO[];
 static const char PIXEL_FORMAT_RAW_JPEG[];
 static const char PIXEL_FORMAT_RAW_MPO[];
+static const char PIXEL_FORMAT_RAW_JPS[];
 
 // TI extensions to standard android scene mode settings
 static const  char SCENE_MODE_SPORT[];
@@ -192,6 +201,7 @@ static const  char EXPOSURE_MODE_FACE[];
 static const  char FOCUS_MODE_PORTRAIT[];
 static const  char FOCUS_MODE_EXTENDED[];
 static const char  FOCUS_MODE_FACE[];
+static const char  FOCUS_MODE_OFF[];
 
 // TI extensions to add iso values
 static const char ISO_MODE_AUTO[];
@@ -209,16 +219,31 @@ static const char EFFECT_VIVID[];
 static const char EFFECT_COLOR_SWAP[];
 static const char EFFECT_BLACKWHITE[];
 
-static const char KEY_S3D2D_PREVIEW[];
-static const char KEY_S3D2D_PREVIEW_MODE[];
+//TI extensions for stereo frame layouts
+static const char KEY_S3D_PRV_FRAME_LAYOUT[];
+static const char KEY_S3D_PRV_FRAME_LAYOUT_VALUES[];
+static const char KEY_S3D_CAP_FRAME_LAYOUT[];
+static const char KEY_S3D_CAP_FRAME_LAYOUT_VALUES[];
+
+//TI extensions for stereo frame layouts
+static const char S3D_NONE[];
+static const char S3D_TB_FULL[];
+static const char S3D_SS_FULL[];
+static const char S3D_TB_SUBSAMPLED[];
+static const char S3D_SS_SUBSAMPLED[];
+
+//TI extentions fo 3D resolutions
+static const char KEY_SUPPORTED_PICTURE_TOPBOTTOM_SIZES[];
+static const char KEY_SUPPORTED_PICTURE_SIDEBYSIDE_SIZES[];
+static const char KEY_SUPPORTED_PREVIEW_TOPBOTTOM_SIZES[];
+static const char KEY_SUPPORTED_PREVIEW_SIDEBYSIDE_SIZES[];
 
 //  TI extensions to add values for AutoConvergence settings.
 static const char AUTOCONVERGENCE_MODE_DISABLE[];
 static const char AUTOCONVERGENCE_MODE_FRAME[];
 static const char AUTOCONVERGENCE_MODE_CENTER[];
-static const char AUTOCONVERGENCE_MODE_FFT[];
+static const char AUTOCONVERGENCE_MODE_TOUCH[];
 static const char AUTOCONVERGENCE_MODE_MANUAL[];
-
 
 //TI extensions for flash mode settings
 static const char FLASH_MODE_FILL_IN[];
@@ -234,9 +259,16 @@ static const char ORIENTATION_SENSOR_270[];
 static const char FACING_FRONT[];
 static const char FACING_BACK[];
 
+static const char KEY_MECHANICAL_MISALIGNMENT_CORRECTION[];
+static const char KEY_MECHANICAL_MISALIGNMENT_CORRECTION_VALUES[];
+
+static const char MECHANICAL_MISALIGNMENT_CORRECTION_ENABLE[];
+static const char MECHANICAL_MISALIGNMENT_CORRECTION_DISABLE[];
+
+static const char VIDEO_SNAPSHOT_SUPPORTED[];
+static const char VIDEO_SNAPSHOT_UNSUPPORTED[];
 };
 
 };
 
 #endif
-

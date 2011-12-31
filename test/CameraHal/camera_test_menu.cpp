@@ -93,7 +93,10 @@ int prevcnt = 0;
 int videoFd = -1;
 int elockidx = 0;
 int wblockidx = 0;
+int afTimeoutIdx = 0;
+int platformID = BLAZE_TABLET2;
 
+int enableMisalignmentCorrectionIdx = 0;
 
 char dir_path[80] = SDCARD_PATH;
 
@@ -104,6 +107,9 @@ const char *expBracketingRange[] = {"", "-30,0,30,0,-30"};
 const char *tempBracketing[] = {"disable", "enable"};
 const char *faceDetection[] = {"disable", "enable"};
 const char *lock[] = {"false", "true"};
+const char *afTimeout[] = {"enable", "disable" };
+
+const char *misalignmentCorrection[] = {"enable", "disable" };
 
 #if defined(OMAP_ENHANCEMENT) && defined(TARGET_OMAP3)
 const char *ipp_mode[] = { "off", "Chroma Suppression", "Edge Enhancement" };
@@ -324,13 +330,13 @@ size_t length_V_bitRate = ARRAY_SIZE(VbitRate);
 
 Zoom zoom[] = {
   { 0,  "1x"  },
-  { 12, "1.5x"},
-  { 20, "2x"  },
-  { 27, "2.5x"},
-  { 32, "3x"  },
-  { 36, "3.5x"},
-  { 40, "4x"  },
-  { 60, "8x"  },
+  { 6,  "1.5x"},
+  { 10, "2x"  },
+  { 14, "2.5x"},
+  { 16, "3x"  },
+  { 18, "3.5x"},
+  { 20, "4x"  },
+  { 30, "8x"  },
 };
 
 size_t length_Zoom = ARRAY_SIZE(zoom);
@@ -362,15 +368,16 @@ fpsConst_RangesSec fpsConstRangesSec[] = {
   { "20000,20000", "[20:20]", 20 },
   { "25000,25000", "[25:25]", 25 },
   { "27000,27000", "[27:27]", 27 },
+  { "30000,30000", "[30:30]", 30 },
 };
 
 size_t length_fpsConst_RangesSec = ARRAY_SIZE(fpsConstRangesSec);
 
 const char *antibanding[] = {
-    "off",
     "auto",
     "50hz",
     "60hz",
+    "off",
 };
 int antibanding_mode = 0;
 const char *focus[] = {
@@ -378,8 +385,10 @@ const char *focus[] = {
     "infinity",
     "macro",
     "continuous-video",
+    "continuous-picture",
     "extended",
     "portrait",
+    "off"
 };
 int focus_mode = 0;
 pixel_format pixelformat[] = {
@@ -390,11 +399,11 @@ pixel_format pixelformat[] = {
   { -1, "raw" },
   };
 
-const char *codingformat[] = {"yuv422i-yuyv", "yuv420sp", "rgb565", "jpeg", "raw", "jps", "mpo", "raw+jpeg", "raw+mpo"};
+const char *codingformat[] = {"yuv422i-yuyv", "yuv420sp", "rgb565", "jpeg", "raw+jpeg", "raw", "jps", "mpo", "raw+mpo"};
 const char *gbce[] = {"disable", "enable"};
 int pictureFormat = 3; // jpeg
 const char *exposure[] = {"auto", "macro", "portrait", "landscape", "sports", "night", "night-portrait", "backlighting", "manual"};
-const char *capture[] = { "high-performance", "high-quality", "video-mode" };
+const char *capture[] = { "high-performance", "high-quality", "high-quality-zsl", "video-mode" };
 const char *autoconvergencemode[] = { "mode-disable", "mode-frame", "mode-center", "mode-fft", "mode-manual" };
 const char *manualconvergencevalues[] = { "-100", "-50", "-30", "-25", "0", "25", "50", "100" };
 
@@ -433,6 +442,7 @@ bool bLogSysLinkTrace = true;
 bool stressTest = false;
 bool stopScript = false;
 int restartCount = 0;
+bool firstTime = true;
 
 /** Calculate delay from a reference time */
 unsigned long long timeval_delay(const timeval *ref) {
@@ -790,6 +800,7 @@ void printSupportedParams()
     printf("\n\r\tSupported Antibanding Options: %s", params.get(CameraParameters::KEY_SUPPORTED_ANTIBANDING));
     printf("\n\r\tSupported Flash Modes: %s", params.get(CameraParameters::KEY_SUPPORTED_FLASH_MODES));
     printf("\n\r\tSupported Focus Areas: %d", params.getInt(CameraParameters::KEY_MAX_NUM_FOCUS_AREAS));
+    printf("\n\r\tSupported Metering Areas: %d", params.getInt(CameraParameters::KEY_MAX_NUM_METERING_AREAS));
 
     if ( NULL != params.get(CameraParameters::KEY_FOCUS_DISTANCES) ) {
         printf("\n\r\tFocus Distances: %s \n", params.get(CameraParameters::KEY_FOCUS_DISTANCES));
@@ -1030,9 +1041,11 @@ int openCamera() {
         }
     }
 
-    params = camera->getParameters();
+    if ( firstTime ) {
+        params = camera->getParameters();
+        firstTime = false;
+    }
     camera->setParameters(params.flatten());
-
     camera->setListener(new CameraHandler());
 
     hardwareActive = true;
@@ -1086,7 +1099,7 @@ int startPreview() {
         camera->setParameters(params.flatten());
         camera->setPreviewDisplay(previewSurface);
 
-        if(!hardwareActive) prevcnt = 0;
+        if(hardwareActive) prevcnt = 0;
 
         camera->startPreview();
 
@@ -1106,7 +1119,6 @@ void stopPreview() {
 
         previewRunning  = false;
         reSizePreview = true;
-        closeCamera();
     }
 }
 
@@ -1115,6 +1127,7 @@ void initDefaults() {
     antibanding_mode = 0;
     focus_mode = 0;
     fpsRangeIdx = 0;
+    afTimeoutIdx = 0;
     previewSizeIDX = 1;  /* Default resolution set to WVGA */
     captureSizeIDX = 3;  /* Default capture resolution is 8MP */
     frameRateIDX = ARRAY_SIZE(fpsConstRanges) - 1;      /* Default frame rate is 30 FPS */
@@ -1359,11 +1372,14 @@ int functional_menu() {
         printf("   F. Start face detection \n");
         printf("   T. Stop face detection \n");
         printf("   G. Touch/Focus area AF\n");
+        printf("   y. Metering area\n");
         printf("   f. Auto Focus/Half Press\n");
+        printf("   I. AF Timeout       %s\n", afTimeout[afTimeoutIdx]);
         printf("   J.Flash:              %s\n", flashModes[flashIdx]);
         printf("   7. EV offset:      %4.1f\n", compensation);
         printf("   8. AWB mode:       %s\n", strawb_mode[awb_mode]);
         printf("   z. Zoom            %s\n", zoom[zoomIDX].zoom_description);
+        printf("   Z. Smooth Zoom     %s\n", zoom[zoomIDX].zoom_description);
         printf("   j. Exposure        %s\n", exposure[exposure_mode]);
         printf("   e. Effect:         %s\n", effects[effects_mode]);
         printf("   w. Scene:          %s\n", scene[scene_mode]);
@@ -1376,6 +1392,8 @@ int functional_menu() {
         printf("   m. Metering mode:     %s\n" , metering[meter_mode]);
         printf("   <. Exposure Lock:     %s\n", lock[elockidx]);
         printf("   >. WhiteBalance Lock:  %s\n",lock[wblockidx]);
+        printf("   ). Mechanical Misalignment Correction:  %s\n",misalignmentCorrection[enableMisalignmentCorrectionIdx]);
+
         printf("\n");
         printf("   Choice: ");
     }
@@ -1451,14 +1469,12 @@ int functional_menu() {
             break;
 
         case '2':
-            stopPreview();
-
             if ( recordingMode ) {
+                stopRecording();
+                stopPreview();
+                closeRecorder();
                 camera->disconnect();
                 camera.clear();
-                stopRecording();
-                closeRecorder();
-
                 camera = Camera::connect(camera_index);
                   if ( NULL == camera.get() ) {
                       sleep(1);
@@ -1470,6 +1486,8 @@ int functional_menu() {
                   camera->setListener(new CameraHandler());
                   camera->setParameters(params.flatten());
                   recordingMode = false;
+            } else {
+                stopPreview();
             }
 
             break;
@@ -1732,6 +1750,16 @@ int functional_menu() {
 
             break;
 
+        case 'I':
+            afTimeoutIdx++;
+            afTimeoutIdx %= ARRAY_SIZE(afTimeout);
+            params.set(KEY_AF_TIMEOUT, afTimeout[afTimeoutIdx]);
+
+            if ( hardwareActive )
+                camera->setParameters(params.flatten());
+
+            break;
+
         case 'T':
 
             if ( hardwareActive )
@@ -1785,8 +1813,12 @@ int functional_menu() {
                 ippIDX_old = ippIDX;
                 ippIDX = 3;
                 params.set(KEY_IPP, ipp_mode[ippIDX]);
+                params.set(CameraParameters::KEY_RECORDING_HINT, CameraParameters::FALSE);
+            } else if ( !strcmp(capture[capture_mode], "video-mode") ) {
+                params.set(CameraParameters::KEY_RECORDING_HINT, CameraParameters::TRUE);
             } else {
                 ippIDX = ippIDX_old;
+                params.set(CameraParameters::KEY_RECORDING_HINT, CameraParameters::FALSE);
             }
 
             params.set(KEY_MODE, (capture[capture_mode]));
@@ -1883,6 +1915,15 @@ int functional_menu() {
 
             if ( hardwareActive )
                 camera->setParameters(params.flatten());
+
+            break;
+
+        case 'Z':
+            zoomIDX++;
+            zoomIDX %= ARRAY_SIZE(zoom);
+
+            if ( hardwareActive )
+                camera->sendCommand(CAMERA_CMD_START_SMOOTH_ZOOM, zoom[zoomIDX].idx, 0);
 
             break;
 
@@ -2007,6 +2048,20 @@ int functional_menu() {
 
             params.remove(CameraParameters::KEY_FOCUS_AREAS);
 
+            break;
+
+        case 'y':
+
+            params.set(CameraParameters::KEY_METERING_AREAS, TEST_METERING_AREA);
+
+            if ( hardwareActive ) {
+                camera->setParameters(params.flatten());
+            }
+
+            params.remove(CameraParameters::KEY_METERING_AREAS);
+
+            break;
+
         case 'f':
 
             gettimeofday(&autofocus_start, 0);
@@ -2091,17 +2146,25 @@ int functional_menu() {
         camera->setParameters(params.flatten());
       break;
 
-        default:
-            print_menu = 0;
+    case ')':
+      enableMisalignmentCorrectionIdx++;
+      enableMisalignmentCorrectionIdx %= ARRAY_SIZE(misalignmentCorrection);
+      params.set(KEY_MECHANICAL_MISALIGNMENT_CORRECTION, misalignmentCorrection[enableMisalignmentCorrectionIdx]);
+      if ( hardwareActive )
+        camera->setParameters(params.flatten());
+      break;
 
-            break;
+    default:
+      print_menu = 0;
+
+      break;
     }
 
     return 0;
 }
 
 void print_usage() {
-    printf(" USAGE: camera_test  <param>  <script>\n");
+    printf(" USAGE: camera_test  <param>  <script> <target_board>\n");
     printf(" <param>\n-----------\n\n");
     printf(" F or f -> Functional tests \n");
     printf(" A or a -> API tests \n");
@@ -2110,6 +2173,10 @@ void print_usage() {
     printf(" SN or sn -> Stress tests; No syslink trace \n\n");
     printf(" <script>\n----------\n");
     printf("Script name (Only for stress tests)\n\n");
+    printf(" <target_board> (Only for stress tests)\n----------------\n");
+    printf(" blaze or B    -> for BLAZE \n");
+    printf(" tablet1 or T1 -> for Blaze TABLET-1 \n");
+    printf(" tablet2 or T2 -> for Blaze TABLET-2.[default] \n\n");
     return;
 }
 
@@ -2431,10 +2498,27 @@ int main(int argc, char *argv[]) {
 
                 break;
         }
-    } else if ( ( argc == 3) && ( ( *argv[1] == 'S' ) || ( *argv[1] == 's') ) ) {
+    } else if ( ( argc <= 4) && ( ( *argv[1] == 'S' ) || ( *argv[1] == 's') ) ) {
 
         if((argv[1][1] == 'N') || (argv[1][1] == 'n')) {
             bLogSysLinkTrace = false;
+        }
+
+        platformID = BLAZE_TABLET2;
+        if( argc == 4 ) {
+            if( strcasecmp(argv[3],"blaze") == 0 || strcasecmp(argv[3],"B") == 0 ){
+                platformID = BLAZE;
+            }
+            else if( (strcasecmp(argv[3],"tablet1") == 0) || (strcasecmp(argv[3],"T1") == 0) ) {
+                platformID = BLAZE_TABLET1;
+            }
+            else if( (strcasecmp(argv[3],"tablet2") == 0) || (strcasecmp(argv[3],"T2") == 0) ) {
+                platformID = BLAZE_TABLET2;
+            }
+            else {
+                printf("Error: Unknown argument for platformID.\n");
+                return -1;
+            }
         }
 
         ProcessState::self()->startThreadPool();

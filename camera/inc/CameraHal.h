@@ -79,42 +79,44 @@
 
 #define CAMHAL_LOGI LOGI
 
-//Uncomment to enable more verbose/debug logs
-//#define DEBUG_LOG
-
-///Camera HAL Logging Functions
-#ifndef DEBUG_LOG
-
-#define CAMHAL_LOGDA(str)
-#define CAMHAL_LOGDB(str, ...)
-#define CAMHAL_LOGVA(str)
-#define CAMHAL_LOGVB(str, ...)
-
-#define CAMHAL_LOGEA LOGE
-#define CAMHAL_LOGEB LOGE
-
-#undef LOG_FUNCTION_NAME
-#undef LOG_FUNCTION_NAME_EXIT
-#define LOG_FUNCTION_NAME
-#define LOG_FUNCTION_NAME_EXIT
-
+// logging functions
+#ifdef CAMERAHAL_DEBUG
+#   define CAMHAL_LOGD  DBGUTILS_LOGD
+#   define CAMHAL_LOGDA DBGUTILS_LOGDA
+#   define CAMHAL_LOGDB DBGUTILS_LOGDB
+#   ifdef CAMERAHAL_DEBUG_VERBOSE
+#       define CAMHAL_LOGV  DBGUTILS_LOGV
+#       define CAMHAL_LOGVA DBGUTILS_LOGVA
+#       define CAMHAL_LOGVB DBGUTILS_LOGVB
+#   else
+#       define CAMHAL_LOGV(...)
+#       define CAMHAL_LOGVA(str)
+#       define CAMHAL_LOGVB(str, ...)
+#   endif
 #else
-
-#define CAMHAL_LOGDA DBGUTILS_LOGDA
-#define CAMHAL_LOGDB DBGUTILS_LOGDB
-#define CAMHAL_LOGVA DBGUTILS_LOGVA
-#define CAMHAL_LOGVB DBGUTILS_LOGVB
-
-#define CAMHAL_LOGEA DBGUTILS_LOGEA
-#define CAMHAL_LOGEB DBGUTILS_LOGEB
-
+#   define CAMHAL_LOGD(...)
+#   define CAMHAL_LOGDA(str)
+#   define CAMHAL_LOGDB(str, ...)
+#   define CAMHAL_LOGV(...)
+#   define CAMHAL_LOGVA(str)
+#   define CAMHAL_LOGVB(str, ...)
 #endif
 
+#define CAMHAL_LOGE  DBGUTILS_LOGE
+#define CAMHAL_LOGEA DBGUTILS_LOGEA
+#define CAMHAL_LOGEB DBGUTILS_LOGEB
+#define CAMHAL_LOGF  DBGUTILS_LOGF
 
+#define CAMHAL_ASSERT DBGUTILS_ASSERT
+#define CAMHAL_ASSERT_X DBGUTILS_ASSERT_X
+
+#define CAMHAL_UNUSED(x) (void)x
 
 #define NONNEG_ASSIGN(x,y) \
     if(x > -1) \
         y = x
+
+#define CAMHAL_SIZE_OF_ARRAY(x) static_cast<int>(sizeof(x)/sizeof(x[0]))
 
 namespace android {
 
@@ -617,6 +619,8 @@ private:
     status_t dummyRaw();
     void copyAndSendPictureFrame(CameraFrame* frame, int32_t msgType);
     void copyAndSendPreviewFrame(CameraFrame* frame, int32_t msgType);
+    size_t calculateBufferSize(size_t width, size_t height, const char *pixelFormat);
+    const char* getContstantForPixelFormat(const char *pixelFormat);
 
 private:
     mutable Mutex mLock;
@@ -758,6 +762,7 @@ public:
         CAMERA_START_FD                             = 22,
         CAMERA_STOP_FD                              = 23,
         CAMERA_SWITCH_TO_EXECUTING                  = 24,
+        CAMERA_USE_BUFFERS_VIDEO_CAPTURE            = 25,
         };
 
     enum CameraMode
@@ -806,12 +811,6 @@ public:
     //APIs to configure Camera adapter and get the current parameter set
     virtual int setParameters(const CameraParameters& params) = 0;
     virtual void getParameters(CameraParameters& params) = 0;
-
-    //API to flush the buffers from Camera
-     status_t flushBuffers()
-        {
-        return sendCommand(CameraAdapter::CAMERA_PREVIEW_FLUSH_BUFFERS);
-        }
 
     //Registers callback for returning image buffers back to CameraHAL
     virtual int registerImageReleaseCallback(release_image_buffers_callback callback, void *user_data) = 0;
@@ -1118,11 +1117,17 @@ private:
     /** Allocate image capture buffers */
     status_t allocImageBufs(unsigned int width, unsigned int height, size_t length, const char* previewFormat, unsigned int bufferCount);
 
+    /** Allocate Raw buffers */
+    status_t allocRawBufs(int width, int height, const char* previewFormat, int bufferCount);
+
     /** Free preview buffers */
     status_t freePreviewBufs();
 
     /** Free video bufs */
     status_t freeVideoBufs(void *bufs);
+
+    /** Free RAW bufs */
+    status_t freeRawBufs();
 
     //Check if a given resolution is supported by the current camera
     //instance
@@ -1149,7 +1154,8 @@ private:
 
     void selectFPSRange(int framerate, int *min_fps, int *max_fps);
 
-    void setPreferredPreviewRes(int width, int height);
+    bool checkFramerateThr(const CameraParameters &params);
+    bool setPreferredPreviewRes(const CameraParameters &params, int width, int height);
     void resetPreviewRes(CameraParameters *mParams, int width, int height);
 
     //@}
@@ -1182,10 +1188,14 @@ public:
     bool mFpsRangeChangedByApp;
 
 
-
+    int mRawWidth;
+    int mRawHeight;
+    bool mRawCapture;
 
 
 ///static member vars
+
+    static const int SW_SCALING_FPS_LIMIT;
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 

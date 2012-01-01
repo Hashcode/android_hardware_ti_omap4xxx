@@ -11,8 +11,8 @@ LOCAL_C_INCLUDES += \
 	$(LOCAL_PATH)/../mm_osal/inc \
 	$(LOCAL_PATH)/../domx \
 	$(LOCAL_PATH)/../domx/omx_rpc/inc \
-	$(HARDWARE_TI_OMAP4_BASE)/../../libhardware/include \
-	$(HARDWARE_TI_OMAP4_BASE)/hwc/
+	$(LOCAL_PATH)/../../../../libhardware/include \
+	$(LOCAL_PATH)/../../hwc/
 
 LOCAL_SHARED_LIBRARIES := \
 	libmm_osal \
@@ -80,7 +80,7 @@ LOCAL_C_INCLUDES += \
 	$(LOCAL_PATH)/../omx_core/inc \
 	$(LOCAL_PATH)/../mm_osal/inc \
 	$(LOCAL_PATH)/../domx \
-	$(HARDWARE_TI_OMAP4_BASE)/ion/ \
+	$(LOCAL_PATH)/../../ion/ \
 	$(LOCAL_PATH)/../domx/omx_rpc/inc
 
 LOCAL_SHARED_LIBRARIES := \
@@ -184,8 +184,8 @@ LOCAL_C_INCLUDES += \
 	$(LOCAL_PATH)/../mm_osal/inc \
 	$(LOCAL_PATH)/../domx \
 	$(LOCAL_PATH)/../domx/omx_rpc/inc \
-	$(HARDWARE_TI_OMAP4_BASE)/../../libhardware/include \
-	$(HARDWARE_TI_OMAP4_BASE)/hwc/
+	$(LOCAL_PATH)/../../../../libhardware/include \
+	$(LOCAL_PATH)/../../hwc/
 
 LOCAL_SHARED_LIBRARIES := \
 	libmm_osal \

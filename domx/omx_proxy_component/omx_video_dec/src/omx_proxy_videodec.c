@@ -64,13 +64,6 @@
 #include "OMX_TI_Video.h"
 #include "OMX_TI_Index.h"
 
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-#define LOG_TAG "OMXPROXYVIDEODEC"
-#include <fcntl.h>
-#include <cutils/properties.h>
-#include <utils/Log.h>
-#endif
-
 #define COMPONENT_NAME "OMX.TI.DUCATI1.VIDEO.DECODER"
 /* needs to be specific for every configuration wrapper */
 
@@ -123,14 +116,6 @@ OMX_ERRORTYPE PROXY_VIDDEC_FillBufferDone(OMX_HANDLETYPE hComponent,
     OMX_PTR pMarkData);
 
 #endif
-extern OMX_ERRORTYPE PrearrageEmptyThisBuffer(OMX_HANDLETYPE hComponent,
-	OMX_BUFFERHEADERTYPE * pBufferHdr);
-
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-extern void DumpVideoFrame(DebugFrame_Dump *frameInfo);
-#endif
-
-OMX_ERRORTYPE OMX_ProxyViddecInit(OMX_HANDLETYPE hComponent);
 
 OMX_ERRORTYPE OMX_ComponentInit(OMX_HANDLETYPE hComponent)
 {
@@ -168,32 +153,7 @@ OMX_ERRORTYPE OMX_ComponentInit(OMX_HANDLETYPE hComponent)
 
 	eError = OMX_ProxyViddecInit(hComponent);
 
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-	if (eError == OMX_ErrorNone)
-	{
-		char value[PROPERTY_VALUE_MAX];
-		property_get("debug.video.dumpframe", value, "0:0");
-		/* -ve value for fromFrame would disable this automatically */
-		pComponentPrivate->debugframeInfo.fromFrame = atoi(strtok(value, ":"));
-		pComponentPrivate->debugframeInfo.toFrame = atoi(strtok(NULL, ":"));
-		pComponentPrivate->debugframeInfo.runningFrame = pComponentPrivate->debugframeInfo.fromFrame;
-	}
-#endif
 	EXIT:
-	if (eError != OMX_ErrorNone)
-	{
-		DOMX_DEBUG("Error in Initializing Proxy");
-		if (pComponentPrivate->cCompName != NULL)
-		{
-			TIMM_OSAL_Free(pComponentPrivate->cCompName);
-			pComponentPrivate->cCompName = NULL;
-		}
-		if (pComponentPrivate != NULL)
-		{
-			TIMM_OSAL_Free(pComponentPrivate);
-			pComponentPrivate = NULL;
-		}
-	}
 		return eError;
 }
 
@@ -226,7 +186,7 @@ OMX_ERRORTYPE OMX_ProxyViddecInit(OMX_HANDLETYPE hComponent)
 	eError = OMX_ProxyCommonInit(hComponent);	// Calling Proxy Common Init()
 	PROXY_assert(eError == OMX_ErrorNone, eError, "Proxy common init returned error");
 #ifdef ANDROID_QUIRK_CHANGE_PORT_VALUES
-	pHandle->SetParameter = PROXY_VIDDEC_SetParameter;
+	pHandle->SetParameter = PROXY_VIDDEC_SetParameter;		
         pHandle->GetParameter = PROXY_VIDDEC_GetParameter;
 #endif
 	pHandle->GetExtensionIndex = PROXY_VIDDEC_GetExtensionIndex;
@@ -271,10 +231,22 @@ OMX_ERRORTYPE OMX_ProxyViddecInit(OMX_HANDLETYPE hComponent)
 	PROXY_assert(eError == OMX_ErrorNone,
 	    eError," Error in Proxy SetParameter for Enhanced port reconfig usage");
 #endif
-	/* This is required to handle WMV/VC-1 content */
-	pHandle->EmptyThisBuffer = PrearrageEmptyThisBuffer;
 
       EXIT:
+	if (eError != OMX_ErrorNone)
+	{
+		DOMX_DEBUG("Error in Initializing Proxy");
+		if (pComponentPrivate->cCompName != NULL)
+		{
+			TIMM_OSAL_Free(pComponentPrivate->cCompName);
+			pComponentPrivate->cCompName = NULL;
+		}
+		if (pComponentPrivate != NULL)
+		{
+			TIMM_OSAL_Free(pComponentPrivate);
+			pComponentPrivate = NULL;
+		}
+	}
 	return eError;
 }
 
@@ -365,15 +337,12 @@ OMX_ERRORTYPE PROXY_VIDDEC_GetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 		{
 			PROXY_CHK_VERSION(pParamStruct, OMX_TI_PARAMNATIVEBUFFERUSAGE);
 			pUsage->nUsage = GRALLOC_USAGE_HW_RENDER;
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-			pUsage->nUsage |= GRALLOC_USAGE_SW_READ_RARELY;
-#endif
 			goto EXIT;
 		}
 	}
 #endif
 	eError = PROXY_GetParameter(hComponent,nParamIndex, pParamStruct);
-	PROXY_assert(eError == OMX_ErrorNone,
+	PROXY_assert((eError == OMX_ErrorNone) || (eError == OMX_ErrorNoMore),
 		    eError," Error in Proxy GetParameter");
 
 	if( nParamIndex == OMX_IndexParamPortDefinition)
@@ -655,8 +624,8 @@ OMX_ERRORTYPE PROXY_VIDDEC_FillThisBuffer(OMX_HANDLETYPE hComponent, OMX_BUFFERH
 
 	pCompPrv = (PROXY_COMPONENT_PRIVATE *) hComp->pComponentPrivate;
 
-	if(pCompPrv->proxyPortBuffers[OMX_VIDEODECODER_OUTPUT_PORT].proxyBufferType
-			== GrallocPointers)
+	if(pCompPrv->proxyPortBuffers[OMX_VIDEODECODER_OUTPUT_PORT].proxyBufferType 
+			== GrallocPointers) 
 	{
 		/* Lock the Gralloc buffer till it gets rendered completely */
 		/* Extract the Gralloc handle from the Header and then call lock on that */
@@ -675,29 +644,10 @@ OMX_ERRORTYPE PROXY_VIDDEC_FillThisBuffer(OMX_HANDLETYPE hComponent, OMX_BUFFERH
 		PROXY_assert(eError == OMX_ErrorNone,
 				eError," Error in Proxy GetParameter for Port Def");
 
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-		/* Get the Video frame crop window */
-		OMX_CONFIG_RECTTYPE rect;
-		rect.nSize = sizeof(rect);
-		rect.nVersion.s.nVersionMajor = OMX_VER_MAJOR;
-		rect.nVersion.s.nVersionMinor = OMX_VER_MINOR;
-		rect.nVersion.s.nRevision = 0x0;
-		rect.nVersion.s.nStep = 0x0;
-		rect.nPortIndex = OMX_VIDEODECODER_OUTPUT_PORT;
-
-		eError = PROXY_GetConfig(hComponent, OMX_IndexConfigCommonOutputCrop, &rect);
-
-		PROXY_assert(eError == OMX_ErrorNone,
-			eError," Error while getting output crop");
-		pCompPrv->debugframeInfo.frame_width = rect.nWidth;
-		pCompPrv->debugframeInfo.frame_height = rect.nHeight;
-		pCompPrv->debugframeInfo.frame_xoffset = rect.nLeft;
-		pCompPrv->debugframeInfo.frame_yoffset = rect.nTop;
-#endif
 		pCompPrv->grallocModule->lock((gralloc_module_t const *) pCompPrv->grallocModule,
 				(buffer_handle_t)grallocHandle, GRALLOC_USAGE_HW_RENDER,
 				0,0,sPortDef.format.video.nFrameWidth, sPortDef.format.video.nFrameHeight,NULL);
-	}
+	}		
 
         eRPCError = PROXY_FillThisBuffer(hComponent, pBufferHdr);
 
@@ -739,7 +689,7 @@ OMX_ERRORTYPE PROXY_VIDDEC_FillBufferDone(OMX_HANDLETYPE hComponent,
 
 	if(pCompPrv->proxyPortBuffers[OMX_VIDEODECODER_OUTPUT_PORT].proxyBufferType
 			== GrallocPointers) {
-		for (count = 0; count < pCompPrv->nTotalBuffers; ++count)
+		for (count = 0; count < pCompPrv->nTotalBuffers; ++count) 
 		{
 			if (pCompPrv->tBufList[count].pBufHeaderRemote == remoteBufHdr)
 			{
@@ -752,35 +702,7 @@ OMX_ERRORTYPE PROXY_VIDDEC_FillBufferDone(OMX_HANDLETYPE hComponent,
 				OMX_ErrorBadParameter,
 				"Received invalid-buffer header from OMX component");
 		pCompPrv->grallocModule->unlock((gralloc_module_t const *) pCompPrv->grallocModule, (buffer_handle_t)grallocHandle);
-
-#ifdef ENABLE_RAW_BUFFERS_DUMP_UTILITY
-		ALOGV("frm[%u] to[%u] run[%u]", pCompPrv->debugframeInfo.fromFrame, pCompPrv->debugframeInfo.toFrame, pCompPrv->debugframeInfo.runningFrame);
-		/* Fill buffer Done successed, hence start dumping if requested	*/
-		OMX_BUFFERHEADERTYPE *pBufHdr = pCompPrv->tBufList[count].pBufHeader;
-		if ((pCompPrv->debugframeInfo.fromFrame == 0) && (pCompPrv->debugframeInfo.runningFrame <= pCompPrv->debugframeInfo.toFrame))
-		{
-			/* Lock the buffer for SW read usage and then access it */
-			pCompPrv->grallocModule->lock((gralloc_module_t const*) pCompPrv->grallocModule,
-				(buffer_handle_t)grallocHandle,
-				GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_SW_READ_RARELY,
-				pCompPrv->debugframeInfo.frame_xoffset,
-                                pCompPrv->debugframeInfo.frame_yoffset,
-				pCompPrv->debugframeInfo.frame_width,
-                                pCompPrv->debugframeInfo.frame_height,
-				(void*)pCompPrv->debugframeInfo.y_uv);
-
-			DumpVideoFrame(&pCompPrv->debugframeInfo);
-
-			pCompPrv->grallocModule->unlock((gralloc_module_t const *) pCompPrv->grallocModule,
-							(buffer_handle_t)grallocHandle);
-			pCompPrv->debugframeInfo.runningFrame++;
-		}
-		else if (pCompPrv->debugframeInfo.fromFrame > 0)
-		{
-			pCompPrv->debugframeInfo.fromFrame--;
-		}
-#endif
-	}
+	} 
 
 	eRPCError = PROXY_FillBufferDone(hComponent,remoteBufHdr, nfilledLen, nOffset, nFlags,
 		nTimeStamp, hMarkTargetComponent, pMarkData);

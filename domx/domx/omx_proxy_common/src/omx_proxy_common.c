@@ -1859,9 +1859,7 @@ OMX_ERRORTYPE PROXY_ComponentDeInit(OMX_HANDLETYPE hComponent)
 
 	pCompPrv = (PROXY_COMPONENT_PRIVATE *) hComp->pComponentPrivate;
 
-#ifdef USE_ION
 	ion_close(pCompPrv->ion_fd);
-#endif
 
 	for (count = 0; count < pCompPrv->nTotalBuffers; count++)
 	{

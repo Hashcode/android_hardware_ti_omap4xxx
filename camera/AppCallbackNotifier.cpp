@@ -123,14 +123,12 @@ void AppCallbackNotifier::EncoderDoneCb(void* main_jpeg, void* thumb_jpeg, Camer
         Mutex::Autolock lock(mBurstLock);
 
 #if defined(OMAP_ENHANCEMENT)
-/* FIXME-HASH
         if ( mBurst )
         {
             mDataCb(CAMERA_MSG_COMPRESSED_BURST_IMAGE, picture, 0, NULL, mCallbackCookie);
 
         }
         else
-*/
 #endif
         {
             mDataCb(CAMERA_MSG_COMPRESSED_IMAGE, picture, 0, NULL, mCallbackCookie);
@@ -938,13 +936,11 @@ void AppCallbackNotifier::notifyFrame()
                     {
                         Mutex::Autolock lock(mBurstLock);
 #if defined(OMAP_ENHANCEMENT)
-/* FIXME-HASH
                         if ( mBurst )
                         {
                             copyAndSendPictureFrame(frame, CAMERA_MSG_COMPRESSED_BURST_IMAGE);
                         }
                         else
-*/
 #endif
                         {
                             copyAndSendPictureFrame(frame, CAMERA_MSG_COMPRESSED_IMAGE);

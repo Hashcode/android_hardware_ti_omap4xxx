@@ -161,7 +161,6 @@ static OMX_ERRORTYPE ComponentPrivateDeInit(OMX_IN OMX_HANDLETYPE hComponent)
 		PROXY_assert(eOsalError == TIMM_OSAL_ERR_NONE,
 		    OMX_ErrorInsufficientResources, "Mutex release failed");
 	}
-/* FIXME-HASH
         for(i=0; i < MAX_NUM_INTERNAL_BUFFERS; i++) {
             if (gCamIonHdl[i][0] != NULL) {
                 ion_free(pCompPrv->ion_fd, gCamIonHdl[i][0]);
@@ -173,7 +172,6 @@ static OMX_ERRORTYPE ComponentPrivateDeInit(OMX_IN OMX_HANDLETYPE hComponent)
             }
 
         }
-*/
 	eError = PROXY_ComponentDeInit(hComponent);
 
       EXIT:
@@ -379,7 +377,6 @@ static OMX_ERRORTYPE CameraSetParam(OMX_IN OMX_HANDLETYPE
             //fprintf(stdout, "CameraSetParam Called for Vtc Slice height = %d\n", ((OMX_TI_PARAM_VTCSLICE *)pComponentParameterStructure)->nSliceHeight);
 		    // MAX_NUM_INTERNAL_BUFFERS;
 
-/* FIXME-HASH
     		for(i=0; i < MAX_NUM_INTERNAL_BUFFERS; i++) {
                     pVtcConfig->nInternalBuffers = i;
 		    ret = ion_alloc_tiler(pCompPrv->ion_fd, 1280, 720, TILER_PIXEL_FMT_8BIT, OMAP_ION_HEAP_TILER_MASK, &handle, (size_t *)&stride_Y);
@@ -396,7 +393,6 @@ static OMX_ERRORTYPE CameraSetParam(OMX_IN OMX_HANDLETYPE
 					      pVtcConfig,
 					pVtcConfig->IonBufhdl, 2);
                }
-*/
 		goto EXIT;
         	break;
 	default:

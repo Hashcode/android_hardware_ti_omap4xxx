@@ -1,19 +1,22 @@
 /*
  * Copyright (C) Texas Instruments - http://www.ti.com/
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 
 
 #ifndef ANDROID_HARDWARE_CAMERA_HARDWARE_H
@@ -26,6 +29,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -35,16 +39,12 @@
 #include "binder/MemoryBase.h"
 #include "binder/MemoryHeapBase.h"
 #include <utils/threads.h>
-#include <camera/CameraParameters.h>
-#include <hardware/camera.h>
+#include <ui/Overlay.h>
+#include <camera/CameraHardwareInterface.h>
 #include "MessageQueue.h"
 #include "Semaphore.h"
 #include "CameraProperties.h"
 #include "DebugUtils.h"
-#include "SensorListener.h"
-
-#include <ui/GraphicBufferAllocator.h>
-#include <ui/GraphicBuffer.h>
 
 #define MIN_WIDTH           640
 #define MIN_HEIGHT          480
@@ -54,8 +54,8 @@
 #define PREVIEW_HEIGHT 144
 #define PIXEL_FORMAT           V4L2_PIX_FMT_UYVY
 
-#define VIDEO_FRAME_COUNT_MAX    8 //NUM_OVERLAY_BUFFERS_REQUESTED
-#define MAX_CAMERA_BUFFERS    8 //NUM_OVERLAY_BUFFERS_REQUESTED
+#define VIDEO_FRAME_COUNT_MAX    NUM_OVERLAY_BUFFERS_REQUESTED
+#define MAX_CAMERA_BUFFERS    NUM_OVERLAY_BUFFERS_REQUESTED
 #define MAX_ZOOM        3
 #define THUMB_WIDTH     80
 #define THUMB_HEIGHT    60
@@ -66,18 +66,11 @@
 #define SHARPNESS_OFFSET 100
 #define CONTRAST_OFFSET 100
 
-#define CAMHAL_GRALLOC_USAGE GRALLOC_USAGE_HW_TEXTURE | \
-                             GRALLOC_USAGE_HW_RENDER | \
-                             GRALLOC_USAGE_SW_READ_RARELY | \
-                             GRALLOC_USAGE_SW_WRITE_NEVER
+#define MAX_MANUAL_EXPOSURE_MS 66 //[ms.]
+#define MAX_MANUAL_GAIN_ISO 3200
 
 //Enables Absolute PPM measurements in logcat
 #define PPM_INSTRUMENTATION_ABS 1
-
-#define LOCK_BUFFER_TRIES 5
-#define HAL_PIXEL_FORMAT_NV12 0x100
-
-#define CAMHAL_LOGI LOGI
 
 //Uncomment to enable more verbose/debug logs
 //#define DEBUG_LOG
@@ -90,8 +83,6 @@
 #define CAMHAL_LOGVA(str)
 #define CAMHAL_LOGVB(str, ...)
 
-#define CAMHAL_LOGEA LOGE
-#define CAMHAL_LOGEB LOGE
 
 #undef LOG_FUNCTION_NAME
 #undef LOG_FUNCTION_NAME_EXIT
@@ -105,10 +96,11 @@
 #define CAMHAL_LOGVA DBGUTILS_LOGVA
 #define CAMHAL_LOGVB DBGUTILS_LOGVB
 
-#define CAMHAL_LOGEA DBGUTILS_LOGEA
-#define CAMHAL_LOGEB DBGUTILS_LOGEB
 
 #endif
+
+#define CAMHAL_LOGEA DBGUTILS_LOGEA
+#define CAMHAL_LOGEB DBGUTILS_LOGEB
 
 
 
@@ -118,7 +110,52 @@
 
 namespace android {
 
+
+/** TODO: Check if we can include this structure from v4l2_utlils.h or define it in some TI top level header file**/
+/*
+ * This is the overlay_t object, it is returned to the user and represents
+ * an overlay. here we use a subclass, where we can store our own state.
+ * This handles will be passed across processes and possibly given to other
+ * HAL modules (for instance video decode modules).
+ */
+struct overlay_true_handle_t : public native_handle {
+    /* add the data fields we need here, for instance: */
+    int ctl_fd;
+    int shared_fd;
+    int width;
+    int height;
+    int format;
+    int num_buffers;
+    int shared_size;
+};
+
+/* Defined in liboverlay */
+typedef struct {
+    int fd;
+    size_t length;
+    uint32_t offset;
+    void *ptr;
+} mapping_data_t;
+
+
+#define PHOTO_PATH          "/tmp/photo_%02d.%s"
+
+#define PROC_THREAD_PROCESS     0x5
+#define PROC_THREAD_EXIT        0x6
+#define PROC_THREAD_NUM_ARGS    26
+#define SHUTTER_THREAD_CALL     0x1
+#define SHUTTER_THREAD_EXIT     0x2
+#define SHUTTER_THREAD_NUM_ARGS 3
+#define RAW_THREAD_CALL         0x1
+#define RAW_THREAD_EXIT         0x2
+#define RAW_THREAD_NUM_ARGS     4
+#define SNAPSHOT_THREAD_START   0x1
+#define SNAPSHOT_THREAD_EXIT    0x2
+
+#define PAGE                    0x1000
 #define PARAM_BUFFER            6000
+#define INDEX_LENGTH            20
+
 
 ///Forward declarations
 class CameraHal;
@@ -126,108 +163,8 @@ class CameraFrame;
 class CameraHalEvent;
 class DisplayFrame;
 
-class CameraArea : public RefBase
-{
-public:
-
-    CameraArea(ssize_t top,
-               ssize_t left,
-               ssize_t bottom,
-               ssize_t right,
-               size_t weight) : mTop(top),
-                                mLeft(left),
-                                mBottom(bottom),
-                                mRight(right),
-                                mWeight(weight) {}
-
-    status_t transfrom(size_t width,
-                       size_t height,
-                       size_t &top,
-                       size_t &left,
-                       size_t &areaWidth,
-                       size_t &areaHeight);
-
-    bool isValid()
-        {
-        return ( ( 0 != mTop ) || ( 0 != mLeft ) || ( 0 != mBottom ) || ( 0 != mRight) );
-        }
-
-    bool isZeroArea()
-    {
-        return  ( (0 == mTop ) && ( 0 == mLeft ) && ( 0 == mBottom )
-                 && ( 0 == mRight ) && ( 0 == mWeight ));
-    }
-
-    size_t getWeight()
-        {
-        return mWeight;
-        }
-
-    bool compare(const sp<CameraArea> &area);
-
-    static status_t parseAreas(const char *area,
-                               size_t areaLength,
-                               Vector< sp<CameraArea> > &areas);
-
-    static status_t checkArea(ssize_t top,
-                              ssize_t left,
-                              ssize_t bottom,
-                              ssize_t right,
-                              ssize_t weight);
-
-    static bool areAreasDifferent(Vector< sp<CameraArea> > &, Vector< sp<CameraArea> > &);
-
-protected:
-    static const ssize_t TOP = -1000;
-    static const ssize_t LEFT = -1000;
-    static const ssize_t BOTTOM = 1000;
-    static const ssize_t RIGHT = 1000;
-    static const ssize_t WEIGHT_MIN = 1;
-    static const ssize_t WEIGHT_MAX = 1000;
-
-    ssize_t mTop;
-    ssize_t mLeft;
-    ssize_t mBottom;
-    ssize_t mRight;
-    size_t mWeight;
-};
-
-class CameraFDResult : public RefBase
-{
-public:
-
-    CameraFDResult() : mFaceData(NULL) {};
-    CameraFDResult(camera_frame_metadata_t *faces) : mFaceData(faces) {};
-
-    virtual ~CameraFDResult() {
-        if ( ( NULL != mFaceData ) && ( NULL != mFaceData->faces ) ) {
-            free(mFaceData->faces);
-            free(mFaceData);
-            mFaceData=NULL;
-        }
-
-        if(( NULL != mFaceData ))
-            {
-            free(mFaceData);
-            mFaceData = NULL;
-            }
-    }
-
-    camera_frame_metadata_t *getFaceResult() { return mFaceData; };
-
-    static const ssize_t TOP = -1000;
-    static const ssize_t LEFT = -1000;
-    static const ssize_t BOTTOM = 1000;
-    static const ssize_t RIGHT = 1000;
-    static const ssize_t INVALID_DATA = -2000;
-
-private:
-
-    camera_frame_metadata_t *mFaceData;
-};
-
 class CameraFrame
-{
+    {
     public:
 
     enum FrameType
@@ -245,16 +182,9 @@ class CameraFrame
             ALL_FRAMES = 0xFFFF   ///Maximum of 16 frame types supported
         };
 
-    enum FrameQuirks
-    {
-        ENCODE_RAW_YUV422I_TO_JPEG = 0x1 << 0,
-        HAS_EXIF_DATA = 0x1 << 1,
-    };
-
     //default contrustor
     CameraFrame():
     mCookie(NULL),
-    mCookie2(NULL),
     mBuffer(NULL),
     mFrameType(0),
     mTimestamp(0),
@@ -263,18 +193,11 @@ class CameraFrame
     mOffset(0),
     mAlignment(0),
     mFd(0),
-    mLength(0),
-    mFrameMask(0),
-    mQuirks(0) {
-
-      mYuv[0] = NULL;
-      mYuv[1] = NULL;
-    }
+    mLength(0) {}
 
     //copy constructor
     CameraFrame(const CameraFrame &frame) :
     mCookie(frame.mCookie),
-    mCookie2(frame.mCookie2),
     mBuffer(frame.mBuffer),
     mFrameType(frame.mFrameType),
     mTimestamp(frame.mTimestamp),
@@ -283,16 +206,9 @@ class CameraFrame
     mOffset(frame.mOffset),
     mAlignment(frame.mAlignment),
     mFd(frame.mFd),
-    mLength(frame.mLength),
-    mFrameMask(frame.mFrameMask),
-    mQuirks(frame.mQuirks) {
-
-      mYuv[0] = frame.mYuv[0];
-      mYuv[1] = frame.mYuv[1];
-    }
+    mLength(frame.mLength) {}
 
     void *mCookie;
-    void *mCookie2;
     void *mBuffer;
     int mFrameType;
     nsecs_t mTimestamp;
@@ -301,18 +217,8 @@ class CameraFrame
     unsigned int mAlignment;
     int mFd;
     size_t mLength;
-    unsigned mFrameMask;
-    unsigned int mQuirks;
-    unsigned int mYuv[2];
     ///@todo add other member vars like  stride etc
-};
-
-enum CameraHalError
-{
-    CAMERA_ERROR_FATAL = 0x1, //Fatal errors can only be recovered by restarting media server
-    CAMERA_ERROR_HARD = 0x2,  // Hard errors are hardware hangs that may be recoverable by resetting the hardware internally within the adapter
-    CAMERA_ERROR_SOFT = 0x4, // Soft errors are non fatal errors that can be recovered from without needing to stop use-case
-};
+    };
 
 ///Common Camera Hal Event class which is visible to CameraAdapter,DisplayAdapter and AppCallbackNotifier
 ///@todo Rename this class to CameraEvent
@@ -320,62 +226,53 @@ class CameraHalEvent
 {
 public:
     //Enums
-    enum CameraHalEventType {
-        NO_EVENTS = 0x0,
+    enum CameraHalEventType
+        {
+          NO_EVENTS = 0x0,
         EVENT_FOCUS_LOCKED = 0x1,
         EVENT_FOCUS_ERROR = 0x2,
         EVENT_ZOOM_INDEX_REACHED = 0x4,
         EVENT_SHUTTER = 0x8,
-        EVENT_FACE = 0x10,
         ///@remarks Future enum related to display, like frame displayed event, could be added here
         ALL_EVENTS = 0xFFFF ///Maximum of 16 event types supported
-    };
+        };
 
     ///Class declarations
     ///@remarks Add a new class for a new event type added above
 
-    //Shutter event specific data
-    typedef struct ShutterEventData_t {
-        bool shutterClosed;
-    }ShutterEventData;
+	//Shutter event specific data
+	typedef struct ShutterEventData_t
+	{
+	bool shutterClosed;
+
+	}ShutterEventData;
 
     ///Focus event specific data
-    typedef struct FocusEventData_t {
-        bool focusLocked;
-        bool focusError;
-        int currentFocusValue;
-    } FocusEventData;
+    typedef struct FocusEventData_t
+        {
+            bool focusLocked;
+            bool focusError;
+            int currentFocusValue;
+        } FocusEventData;
 
     ///Zoom specific event data
-    typedef struct ZoomEventData_t {
-        int currentZoomIndex;
-        bool targetZoomIndexReached;
-    } ZoomEventData;
+    typedef struct ZoomEventData_t
+        {
+            int currentZoomIndex;
+            bool targetZoomIndexReached;
+        } ZoomEventData;
 
-    typedef struct FaceData_t {
-        ssize_t top;
-        ssize_t left;
-        ssize_t bottom;
-        ssize_t right;
-        size_t score;
-    } FaceData;
-
-    typedef sp<CameraFDResult> FaceEventData;
-
-    class CameraHalEventData : public RefBase{
-
-    public:
-
+    typedef union
+        {
         CameraHalEvent::FocusEventData focusEvent;
         CameraHalEvent::ZoomEventData zoomEvent;
-        CameraHalEvent::ShutterEventData shutterEvent;
-        CameraHalEvent::FaceEventData faceEvent;
-    };
+	CameraHalEvent::ShutterEventData shutterEvent;
+        } CameraHalEventData;
 
     //default contrustor
     CameraHalEvent():
-    mCookie(NULL),
-    mEventType(NO_EVENTS) {}
+      mCookie(NULL),
+      mEventType(NO_EVENTS) {}
 
     //copy constructor
     CameraHalEvent(const CameraHalEvent &event) :
@@ -385,10 +282,11 @@ public:
 
     void* mCookie;
     CameraHalEventType mEventType;
-    sp<CameraHalEventData> mEventData;
+    CameraHalEventData mEventData;
 
 };
 
+///@todo See if we can club these type declarations into a namespace
 ///      Have a generic callback class based on template - to adapt CameraFrame and Event
 typedef void (*frame_callback) (CameraFrame *cameraFrame);
 typedef void (*event_callback) (CameraHalEvent *event);
@@ -434,8 +332,6 @@ class FrameNotifier : public MessageNotifier
 {
 public:
     virtual void returnFrame(void* frameBuf, CameraFrame::FrameType frameType) = 0;
-    virtual void addFramePointers(void *frameBuf, void *buf) = 0;
-    virtual void removeFramePointers() = 0;
 
     virtual ~FrameNotifier() {};
 };
@@ -455,8 +351,6 @@ public:
     int enableFrameNotification(int32_t frameTypes);
     int disableFrameNotification(int32_t frameTypes);
     int returnFrame(void *frameBuf, CameraFrame::FrameType frameType);
-    void addFramePointers(void *frameBuf, void *buf);
-    void removeFramePointers();
 };
 
 /** Wrapper class around MessageNotifier, which is used by display and notification classes for interacting with
@@ -497,13 +391,14 @@ public:
 /**
   * Class for handling data and notify callbacks to application
   */
-class   AppCallbackNotifier: public ErrorNotifier , public virtual RefBase
+class   AppCallbackNotifier: public ErrorNotifier, public virtual RefBase
 {
 
 public:
 
     ///Constants
     static const int NOTIFIER_TIMEOUT;
+    static const size_t EMPTY_RAW_SIZE;
     static const int32_t MAX_BUFFERS = 8;
 
     enum NotifierCommands
@@ -539,6 +434,7 @@ public:
     //All sub-components of Camera HAL call this whenever any error happens
     virtual void errorNotify(int error);
 
+    sp<IMemoryHeap> getPreviewHeap();
     status_t startPreviewCallbacks(CameraParameters &params, void *buffers, uint32_t *offsets, int fd, size_t length, size_t count);
     status_t stopPreviewCallbacks();
 
@@ -549,21 +445,19 @@ public:
     void setMeasurements(bool enable);
 
     //thread loops
-    bool notificationThread();
+    void notificationThread();
 
     ///Notification callback functions
     static void frameCallbackRelay(CameraFrame* caFrame);
     static void eventCallbackRelay(CameraHalEvent* chEvt);
     void frameCallback(CameraFrame* caFrame);
     void eventCallback(CameraHalEvent* chEvt);
-    void flushAndReturnFrames();
 
-    void setCallbacks(CameraHal *cameraHal,
-                        camera_notify_callback notify_cb,
-                        camera_data_callback data_cb,
-                        camera_data_timestamp_callback data_cb_timestamp,
-                        camera_request_memory get_memory,
-                        void *user);
+    void setCallbacks(CameraHardwareInterface *cameraHal,
+                                            notify_callback notifyCb,
+                                            data_callback dataCb,
+                                            data_callback_timestamp dataCbTimestamp,
+                                            void* user);
 
     //Set Burst mode
     void setBurst(bool burst);
@@ -571,24 +465,13 @@ public:
     //Notifications from CameraHal for video recording case
     status_t startRecording();
     status_t stopRecording();
-    status_t initSharedVideoBuffers(void *buffers, uint32_t *offsets, int fd, size_t length, size_t count, void *vidBufs);
-    status_t releaseRecordingFrame(const void *opaque);
-
-	status_t useMetaDataBufferMode(bool enable);
-
-    void EncoderDoneCb(void*, void*, CameraFrame::FrameType type, void* cookie1, void* cookie2);
-
-    void useVideoBuffers(bool useVideoBuffers);
-
-    bool getUesVideoBuffers();
-    void setVideoRes(int width, int height);
-
-    void flushEventQueue();
+    status_t initSharedVideoBuffers(void *buffers, uint32_t *offsets, int fd, size_t length, size_t count);
+    status_t releaseRecordingFrame(const sp<IMemory>& mem);
 
     //Internal class definitions
     class NotificationThread : public Thread {
         AppCallbackNotifier* mAppCallbackNotifier;
-        TIUTILS::MessageQueue mNotificationThreadQ;
+        MessageQueue mNotificationThreadQ;
     public:
         enum NotificationThreadCommands
         {
@@ -600,10 +483,11 @@ public:
         NotificationThread(AppCallbackNotifier* nh)
             : Thread(false), mAppCallbackNotifier(nh) { }
         virtual bool threadLoop() {
-            return mAppCallbackNotifier->notificationThread();
+            mAppCallbackNotifier->notificationThread();
+            return false;
         }
 
-        TIUTILS::MessageQueue &msgQ() { return mNotificationThreadQ;}
+        MessageQueue &msgQ() { return mNotificationThreadQ;}
     };
 
     //Friend declarations
@@ -614,18 +498,14 @@ private:
     void notifyFrame();
     bool processMessage();
     void releaseSharedVideoBuffers();
-    status_t dummyRaw();
-    void copyAndSendPictureFrame(CameraFrame* frame, int32_t msgType);
-    void copyAndSendPreviewFrame(CameraFrame* frame, int32_t msgType);
 
 private:
     mutable Mutex mLock;
     mutable Mutex mBurstLock;
-    CameraHal* mCameraHal;
-    camera_notify_callback mNotifyCb;
-    camera_data_callback   mDataCb;
-    camera_data_timestamp_callback mDataCbTimestamp;
-    camera_request_memory mRequestMemory;
+    sp<CameraHardwareInterface> mCameraHal;
+    notify_callback mNotifyCb;
+    data_callback   mDataCb;
+    data_callback_timestamp mDataCbTimestamp;
     void *mCallbackCookie;
 
     //Keeps Video MemoryHeaps and Buffers within
@@ -633,42 +513,31 @@ private:
     KeyedVector<unsigned int, unsigned int> mVideoHeaps;
     KeyedVector<unsigned int, unsigned int> mVideoBuffers;
     KeyedVector<unsigned int, unsigned int> mVideoMap;
-
-    //Keeps list of Gralloc handles and associated Video Metadata Buffers
-    KeyedVector<uint32_t, uint32_t> mVideoMetadataBufferMemoryMap;
-    KeyedVector<uint32_t, uint32_t> mVideoMetadataBufferReverseMap;
-
     bool mBufferReleased;
 
+    CameraHal *mHardware;
     sp< NotificationThread> mNotificationThread;
     EventProvider *mEventProvider;
     FrameProvider *mFrameProvider;
-    TIUTILS::MessageQueue mEventQ;
-    TIUTILS::MessageQueue mFrameQ;
+    MessageQueue mEventQ;
+    MessageQueue mFrameQ;
     NotifierState mNotifierState;
 
     bool mPreviewing;
-    camera_memory_t* mPreviewMemory;
-    unsigned char* mPreviewBufs[MAX_BUFFERS];
+    sp<MemoryHeapBase> mPreviewHeap;
+    sp<MemoryHeapBase> mPreviewHeapArr[MAX_BUFFERS];
+    sp<MemoryBase> mPreviewBuffers[MAX_BUFFERS];
     int mPreviewBufCount;
     const char *mPreviewPixelFormat;
     KeyedVector<unsigned int, sp<MemoryHeapBase> > mSharedPreviewHeaps;
     KeyedVector<unsigned int, sp<MemoryBase> > mSharedPreviewBuffers;
+    bool mAppSupportsStride;
 
     //Burst mode active
     bool mBurst;
     mutable Mutex mRecordingLock;
     bool mRecording;
     bool mMeasurementEnabled;
-
-    bool mUseMetaDataBufferMode;
-    bool mRawAvailable;
-
-    bool mUseVideoBuffers;
-
-    int mVideoWidth;
-    int mVideoHeight;
-
 };
 
 
@@ -678,12 +547,10 @@ private:
 class MemoryManager : public BufferProvider, public virtual RefBase
 {
 public:
-    MemoryManager():mIonFd(0){ }
+    ///Initializes the display adapter creates any resources required
+    status_t initialize(){ return NO_ERROR; }
 
-    ///Initializes the memory manager creates any resources required
-    status_t initialize() { return NO_ERROR; }
-
-    int setErrorHandler(ErrorNotifier *errorNotifier);
+    virtual status_t setErrorHandler(ErrorNotifier *errorNotifier);
     virtual void* allocateBuffer(int width, int height, const char* format, int &bytes, int numBufs);
     virtual uint32_t * getOffsets();
     virtual int getFd() ;
@@ -692,10 +559,6 @@ public:
 private:
 
     sp<ErrorNotifier> mErrorNotifier;
-    int mIonFd;
-    KeyedVector<unsigned int, unsigned int> mIonHandleMap;
-    KeyedVector<unsigned int, unsigned int> mIonFdMap;
-    KeyedVector<unsigned int, unsigned int> mIonBufLength;
 };
 
 
@@ -708,18 +571,6 @@ private:
 
 class CameraAdapter: public FrameNotifier, public virtual RefBase
 {
-protected:
-    enum AdapterActiveStates {
-        INTIALIZED_ACTIVE =     1 << 0,
-        LOADED_PREVIEW_ACTIVE = 1 << 1,
-        PREVIEW_ACTIVE =        1 << 2,
-        LOADED_CAPTURE_ACTIVE = 1 << 3,
-        CAPTURE_ACTIVE =        1 << 4,
-        BRACKETING_ACTIVE =     1 << 5,
-        AF_ACTIVE =             1 << 6,
-        ZOOM_ACTIVE =           1 << 7,
-        VIDEO_ACTIVE =          1 << 8,
-    };
 public:
     typedef struct
         {
@@ -728,36 +579,26 @@ public:
          int mFd;
          size_t mLength;
          size_t mCount;
-         size_t mMaxQueueable;
         } BuffersDescriptor;
 
     enum CameraCommands
         {
-        CAMERA_START_PREVIEW                        = 0,
-        CAMERA_STOP_PREVIEW                         = 1,
-        CAMERA_START_VIDEO                          = 2,
-        CAMERA_STOP_VIDEO                           = 3,
-        CAMERA_START_IMAGE_CAPTURE                  = 4,
-        CAMERA_STOP_IMAGE_CAPTURE                   = 5,
-        CAMERA_PERFORM_AUTOFOCUS                    = 6,
-        CAMERA_CANCEL_AUTOFOCUS                     = 7,
-        CAMERA_PREVIEW_FLUSH_BUFFERS                = 8,
-        CAMERA_START_SMOOTH_ZOOM                    = 9,
-        CAMERA_STOP_SMOOTH_ZOOM                     = 10,
-        CAMERA_USE_BUFFERS_PREVIEW                  = 11,
-        CAMERA_SET_TIMEOUT                          = 12,
-        CAMERA_CANCEL_TIMEOUT                       = 13,
-        CAMERA_START_BRACKET_CAPTURE                = 14,
-        CAMERA_STOP_BRACKET_CAPTURE                 = 15,
-        CAMERA_QUERY_RESOLUTION_PREVIEW             = 16,
-        CAMERA_QUERY_BUFFER_SIZE_IMAGE_CAPTURE      = 17,
-        CAMERA_QUERY_BUFFER_SIZE_PREVIEW_DATA       = 18,
-        CAMERA_USE_BUFFERS_IMAGE_CAPTURE            = 19,
-        CAMERA_USE_BUFFERS_PREVIEW_DATA             = 20,
-        CAMERA_TIMEOUT_EXPIRED                      = 21,
-        CAMERA_START_FD                             = 22,
-        CAMERA_STOP_FD                              = 23,
-        CAMERA_SWITCH_TO_EXECUTING                  = 24,
+        CAMERA_START_PREVIEW = 0,
+        CAMERA_STOP_PREVIEW,
+        CAMERA_START_VIDEO,
+        CAMERA_STOP_VIDEO,
+        CAMERA_START_IMAGE_CAPTURE,
+        CAMERA_STOP_IMAGE_CAPTURE,
+        CAMERA_PERFORM_AUTOFOCUS,
+        CAMERA_CANCEL_AUTOFOCUS,
+        CAMERA_PREVIEW_FLUSH_BUFFERS,
+        CAMERA_START_SMOOTH_ZOOM,
+        CAMERA_STOP_SMOOTH_ZOOM,
+        CAMERA_USE_BUFFERS,
+        CAMERA_SET_TIMEOUT,
+        CAMERA_CANCEL_TIMEOUT,
+        CAMERA_START_BRACKET_CAPTURE,
+        CAMERA_STOP_BRACKET_CAPTURE
         };
 
     enum CameraMode
@@ -767,45 +608,41 @@ public:
         CAMERA_VIDEO,
         CAMERA_MEASUREMENT
         };
-
-    enum AdapterState {
-        INTIALIZED_STATE           = INTIALIZED_ACTIVE,
-        LOADED_PREVIEW_STATE       = LOADED_PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        PREVIEW_STATE              = PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        LOADED_CAPTURE_STATE       = LOADED_CAPTURE_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        CAPTURE_STATE              = CAPTURE_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        BRACKETING_STATE           = BRACKETING_ACTIVE | CAPTURE_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE ,
-        AF_STATE                   = AF_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        ZOOM_STATE                 = ZOOM_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        VIDEO_STATE                = VIDEO_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        VIDEO_AF_STATE             = VIDEO_ACTIVE | AF_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        VIDEO_ZOOM_STATE           = VIDEO_ACTIVE | ZOOM_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        VIDEO_LOADED_CAPTURE_STATE = VIDEO_ACTIVE | LOADED_CAPTURE_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        VIDEO_CAPTURE_STATE        = VIDEO_ACTIVE | CAPTURE_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        AF_ZOOM_STATE              = AF_ACTIVE | ZOOM_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-        BRACKETING_ZOOM_STATE      = BRACKETING_ACTIVE | ZOOM_ACTIVE | PREVIEW_ACTIVE | INTIALIZED_ACTIVE,
-    };
-
 public:
 
     ///Initialzes the camera adapter creates any resources required
-    virtual int initialize(CameraProperties::Properties*) = 0;
+    virtual status_t initialize(int sensor_index=0) = 0;
 
-    virtual int setErrorHandler(ErrorNotifier *errorNotifier) = 0;
+    virtual status_t setErrorHandler(ErrorNotifier *errorNotifier) = 0;
 
     //Message/Frame notification APIs
-    virtual void enableMsgType(int32_t msgs,
-                               frame_callback callback = NULL,
-                               event_callback eventCb = NULL,
-                               void *cookie = NULL) = 0;
+    virtual void enableMsgType(int32_t msgs, frame_callback callback=NULL, event_callback eventCb=NULL, void* cookie=NULL) = 0;
     virtual void disableMsgType(int32_t msgs, void* cookie) = 0;
     virtual void returnFrame(void* frameBuf, CameraFrame::FrameType frameType) = 0;
-    virtual void addFramePointers(void *frameBuf, void *buf) = 0;
-    virtual void removeFramePointers() = 0;
 
     //APIs to configure Camera adapter and get the current parameter set
-    virtual int setParameters(const CameraParameters& params) = 0;
+    virtual status_t setParameters(const CameraParameters& params) = 0;
     virtual void getParameters(CameraParameters& params) = 0;
+
+    //API to get the caps
+    virtual status_t getCaps(CameraParameters &params) = 0;
+
+    //Used together with capabilities
+    virtual int getRevision() = 0;
+
+    //API to give the buffers to Adapter
+    status_t useBuffers(CameraMode mode, void *bufArr, uint32_t *offsets, int fd, size_t length,  int num)
+        {
+        BuffersDescriptor desc;
+
+        desc.mBuffers = bufArr;
+        desc.mOffsets = offsets;
+        desc.mFd = fd;
+        desc.mLength = length;
+        desc.mCount = ( size_t ) num;
+
+        return sendCommand(CameraAdapter::CAMERA_USE_BUFFERS, mode, (int) &desc);
+        }
 
     //API to flush the buffers from Camera
      status_t flushBuffers()
@@ -814,42 +651,30 @@ public:
         }
 
     //Registers callback for returning image buffers back to CameraHAL
-    virtual int registerImageReleaseCallback(release_image_buffers_callback callback, void *user_data) = 0;
+    virtual status_t registerImageReleaseCallback(release_image_buffers_callback callback, void *user_data) = 0;
 
     //Registers callback, which signals a completed image capture
-    virtual int registerEndCaptureCallback(end_image_capture_callback callback, void *user_data) = 0;
+    virtual status_t registerEndCaptureCallback(end_image_capture_callback callback, void *user_data) = 0;
 
     //API to send a command to the camera
-    virtual status_t sendCommand(CameraCommands operation, int value1=0, int value2=0, int value3=0) = 0;
+    virtual status_t sendCommand(int operation, int value1=0, int value2=0, int value3=0) = 0;
+
+    //API to cancel a currently executing command
+    virtual status_t cancelCommand(int operation) = 0;
+
+    //API to get the frame size required to be allocated. This size is used to override the size passed
+    //by camera service when VSTAB/VNF is turned ON for example
+    virtual void getFrameSize(int &width, int &height) = 0;
+
+    //API to get required data frame size
+    virtual status_t getFrameDataSize(size_t &dataFrameSize, size_t bufferCount) = 0;
+
+    //API to get required picture buffers size with the current configuration in CameraParameters
+    virtual status_t getPictureBufferSize(size_t &length, size_t bufferCount) = 0;
 
     virtual ~CameraAdapter() {};
-
-    //Retrieves the current Adapter state
-    virtual AdapterState getState() = 0;
-
-    //Retrieves the next Adapter state
-    virtual AdapterState getNextState() = 0;
-
-    // Receive orientation events from CameraHal
-    virtual void onOrientationEvent(uint32_t orientation, uint32_t tilt) = 0;
-
-    // Rolls the state machine back to INTIALIZED_STATE from the current state
-    virtual status_t rollbackToInitializedState() = 0;
-
-    // Retrieves the current Adapter state - for internal use (not locked)
-    virtual status_t getState(AdapterState &state) = 0;
-    // Retrieves the next Adapter state - for internal use (not locked)
-    virtual status_t getNextState(AdapterState &state) = 0;
-
-protected:
-    //The first two methods will try to switch the adapter state.
-    //Every call to setState() should be followed by a corresponding
-    //call to commitState(). If the state switch fails, then it will
-    //get reset to the previous state via rollbackState().
-    virtual status_t setState(CameraCommands operation) = 0;
-    virtual status_t commitState() = 0;
-    virtual status_t rollbackState() = 0;
 };
+
 
 class DisplayAdapter : public BufferProvider, public virtual RefBase
 {
@@ -863,28 +688,27 @@ public:
     } S3DParameters;
 
     ///Initializes the display adapter creates any resources required
-    virtual int initialize() = 0;
+    virtual status_t initialize() = 0;
 
-    virtual int setPreviewWindow(struct preview_stream_ops *window) = 0;
+    virtual int setOverlay(const sp<Overlay> &overlay) = 0;
     virtual int setFrameProvider(FrameNotifier *frameProvider) = 0;
-    virtual int setErrorHandler(ErrorNotifier *errorNotifier) = 0;
-    virtual int enableDisplay(int width, int height, struct timeval *refTime = NULL, S3DParameters *s3dParams = NULL) = 0;
-    virtual int disableDisplay(bool cancel_buffer = true) = 0;
+    virtual status_t setErrorHandler(ErrorNotifier *errorNotifier) = 0;
+    virtual int enableDisplay(struct timeval *refTime = NULL, S3DParameters *s3dParams = NULL) = 0;
+    virtual int disableDisplay() = 0;
     //Used for Snapshot review temp. pause
-    virtual int pauseDisplay(bool pause) = 0;
+    virtual status_t pauseDisplay(bool pause) = 0;
+
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
+
     //Used for shot to snapshot measurement
-    virtual int setSnapshotTimeRef(struct timeval *refTime = NULL) = 0;
+    virtual status_t setSnapshotTimeRef(struct timeval *refTime = NULL) = 0;
+
 #endif
 
     virtual int useBuffers(void *bufArr, int num) = 0;
     virtual bool supportsExternalBuffering() = 0;
 
-    // Get max queueable buffers display supports
-    // This function should only be called after
-    // allocateBuffer
-    virtual int maxQueueableBuffers(unsigned int& queueable) = 0;
 };
 
 static void releaseImageBuffers(void *userData);
@@ -897,10 +721,11 @@ static void endImageCapture(void *userData);
     This class implements the interface methods defined in CameraHardwareInterface
     for the OMAP4 platform
 
-*/
-class CameraHal
+    @note This class has undergone major re-architecturing from OMAP3
 
-{
+*/
+class CameraHal : public CameraHardwareInterface {
+
 
 public:
     ///Constants
@@ -911,248 +736,246 @@ public:
 
     /*--------------------Interface Methods---------------------------------*/
 
+    /** @name externalFunctions
+     * Functions defined in CameraHardwareInterface class
+     */
      //@{
 public:
+        /** Return the IMemoryHeap for the preview image heap */
+        virtual sp<IMemoryHeap>         getPreviewHeap() const;
 
-    /** Set the notification and data callbacks */
-    void setCallbacks(camera_notify_callback notify_cb,
-                        camera_data_callback data_cb,
-                        camera_data_timestamp_callback data_cb_timestamp,
-                        camera_request_memory get_memory,
-                        void *user);
+        /** Return the IMemoryHeap for the raw image heap */
+        virtual sp<IMemoryHeap>         getRawHeap() const;
 
-    /** Receives orientation events from SensorListener **/
-    void onOrientationEvent(uint32_t orientation, uint32_t tilt);
+        /** Set the notification and data callbacks */
+        virtual void setCallbacks(notify_callback notify_cb,
+                                  data_callback data_cb,
+                                  data_callback_timestamp data_cb_timestamp,
+                                  void* user);
 
-    /**
-     * The following three functions all take a msgtype,
-     * which is a bitmask of the messages defined in
-     * include/ui/Camera.h
-     */
+        /**
+         * The following three functions all take a msgtype,
+         * which is a bitmask of the messages defined in
+         * include/ui/Camera.h
+         */
 
-    /**
-     * Enable a message, or set of messages.
-     */
-    void        enableMsgType(int32_t msgType);
+        /**
+         * Enable a message, or set of messages.
+         */
+        virtual void        enableMsgType(int32_t msgType);
 
-    /**
-     * Disable a message, or a set of messages.
-     */
-    void        disableMsgType(int32_t msgType);
+        /**
+         * Disable a message, or a set of messages.
+         */
+        virtual void        disableMsgType(int32_t msgType);
 
-    /**
-     * Query whether a message, or a set of messages, is enabled.
-     * Note that this is operates as an AND, if any of the messages
-     * queried are off, this will return false.
-     */
-    int        msgTypeEnabled(int32_t msgType);
+        /**
+         * Query whether a message, or a set of messages, is enabled.
+         * Note that this is operates as an AND, if any of the messages
+         * queried are off, this will return false.
+         */
+        virtual bool        msgTypeEnabled(int32_t msgType);
 
-    /**
-     * Start preview mode.
-     */
-    int    startPreview();
+        /**
+         * Start preview mode.
+         */
+        virtual status_t    startPreview();
 
-    /**
-     * Only used if overlays are used for camera preview.
-     */
-    int setPreviewWindow(struct preview_stream_ops *window);
+        /**
+         * Only used if overlays are used for camera preview.
+         */
+        virtual bool         useOverlay(){return true;}
+        virtual status_t     setOverlay(const sp<Overlay> &overlay);
 
-    /**
-     * Stop a previously started preview.
-     */
-    void        stopPreview();
+        /**
+         * Stop a previously started preview.
+         */
+        virtual void        stopPreview();
 
-    /**
-     * Returns true if preview is enabled.
-     */
-    bool        previewEnabled();
+        /**
+         * Returns true if preview is enabled.
+         */
+        virtual bool        previewEnabled();
 
-    /**
-     * Start record mode. When a record image is available a CAMERA_MSG_VIDEO_FRAME
-     * message is sent with the corresponding frame. Every record frame must be released
-     * by calling releaseRecordingFrame().
-     */
-    int    startRecording();
+        /**
+         * Start record mode. When a record image is available a CAMERA_MSG_VIDEO_FRAME
+         * message is sent with the corresponding frame. Every record frame must be released
+         * by calling releaseRecordingFrame().
+         */
+        virtual status_t    startRecording();
 
-    /**
-     * Stop a previously started recording.
-     */
-    void        stopRecording();
+        /**
+         * Stop a previously started recording.
+         */
+        virtual void        stopRecording();
 
-    /**
-     * Returns true if recording is enabled.
-     */
-    int        recordingEnabled();
+        /**
+         * Returns true if recording is enabled.
+         */
+        virtual bool        recordingEnabled();
 
-    /**
-     * Release a record frame previously returned by CAMERA_MSG_VIDEO_FRAME.
-     */
-    void        releaseRecordingFrame(const void *opaque);
+        /**
+         * Release a record frame previously returned by CAMERA_MSG_VIDEO_FRAME.
+         */
+        virtual void        releaseRecordingFrame(const sp<IMemory>& mem);
 
-    /**
-     * Start auto focus, the notification callback routine is called
-     * with CAMERA_MSG_FOCUS once when focusing is complete. autoFocus()
-     * will be called again if another auto focus is needed.
-     */
-    int    autoFocus();
+        /**
+         * Start auto focus, the notification callback routine is called
+         * with CAMERA_MSG_FOCUS once when focusing is complete. autoFocus()
+         * will be called again if another auto focus is needed.
+         */
+        virtual status_t    autoFocus();
 
-    /**
-     * Cancels auto-focus function. If the auto-focus is still in progress,
-     * this function will cancel it. Whether the auto-focus is in progress
-     * or not, this function will return the focus position to the default.
-     * If the camera does not support auto-focus, this is a no-op.
-     */
-    int    cancelAutoFocus();
+        /**
+         * Cancels auto-focus function. If the auto-focus is still in progress,
+         * this function will cancel it. Whether the auto-focus is in progress
+         * or not, this function will return the focus position to the default.
+         * If the camera does not support auto-focus, this is a no-op.
+         */
+        virtual status_t    cancelAutoFocus();
 
-    /**
-     * Take a picture.
-     */
-    int    takePicture();
+        /**
+         * Take a picture.
+         */
+        virtual status_t    takePicture();
 
-    /**
-     * Cancel a picture that was started with takePicture.  Calling this
-     * method when no picture is being taken is a no-op.
-     */
-    int    cancelPicture();
+        /**
+         * Cancel a picture that was started with takePicture.  Calling this
+         * method when no picture is being taken is a no-op.
+         */
+        virtual status_t    cancelPicture();
 
-    /** Set the camera parameters. */
-    int    setParameters(const char* params);
-    int    setParameters(const CameraParameters& params);
+        /** Set the camera parameters. */
+        virtual status_t    setParameters(const CameraParameters& params);
 
-    /** Return the camera parameters. */
-    char*  getParameters();
-    void putParameters(char *);
+        /** Return the camera parameters. */
+        virtual CameraParameters  getParameters() const;
 
-    /**
-     * Send command to camera driver.
-     */
-    int sendCommand(int32_t cmd, int32_t arg1, int32_t arg2);
+        /**
+         * Send command to camera driver.
+         */
+        virtual status_t sendCommand(int32_t cmd, int32_t arg1, int32_t arg2);
 
-    /**
-     * Release the hardware resources owned by this object.  Note that this is
-     * *not* done in the destructor.
-     */
-    void release();
+        /**
+         * Release the hardware resources owned by this object.  Note that this is
+         * *not* done in the destructor.
+         */
+        virtual void release();
 
-    /**
-     * Dump state of the camera hardware
-     */
-    int dump(int fd) const;
-
-
-		status_t storeMetaDataInBuffers(bool enable);
+        /**
+         * Dump state of the camera hardware
+         */
+        virtual status_t dump(int fd, const Vector<String16>& args) const;
 
      //@}
 
 /*--------------------Internal Member functions - Public---------------------------------*/
 
 public:
- /** @name internalFunctionsPublic */
-  //@{
+     /** @name internalFunctionsPublic */
+      //@{
 
-    /** Constructor of CameraHal */
-    CameraHal(int cameraId);
+         /** Constructor of CameraHal */
+         CameraHal(int cameraId);
 
-    // Destructor of CameraHal
-    ~CameraHal();
+        /** Destructor of CameraHal
+        *@todo Investigate why the destructor is virtual
+        */
+        virtual ~CameraHal();
 
-    /** Initialize CameraHal */
-    status_t initialize(CameraProperties::Properties*);
-
-    /** Deinitialize CameraHal */
-    void deinitialize();
+        /** Creates singleton instance of CameraHal */
+        static sp<CameraHardwareInterface> createInstance(int cameraId);
 
 #if PPM_INSTRUMENTATION || PPM_INSTRUMENTATION_ABS
 
-    //Uses the constructor timestamp as a reference to calcluate the
-    // elapsed time
-    static void PPM(const char *);
-    //Uses a user provided timestamp as a reference to calcluate the
-    // elapsed time
-    static void PPM(const char *, struct timeval*, ...);
+        //Uses the constructor timestamp as a reference to calcluate the
+        // elapsed time
+        static void PPM(const char *);
+        //Uses a user provided timestamp as a reference to calcluate the
+        // elapsed time
+        static void PPM(const char *, struct timeval*, ...);
 
 #endif
 
-    /** Free image bufs */
-    status_t freeImageBufs();
+        /** Free image bufs */
+        status_t freeImageBufs();
 
-    //Signals the end of image capture
-    status_t signalEndImageCapture();
+        //Signals the end of image capture
+        status_t signalEndImageCapture();
 
-    //Events
-    static void eventCallbackRelay(CameraHalEvent* event);
-    void eventCallback(CameraHalEvent* event);
-    void setEventProvider(int32_t eventMask, MessageNotifier * eventProvider);
+      //Events
+     static void eventCallbackRelay(CameraHalEvent* event);
+     void eventCallback(CameraHalEvent* event);
+     void setEventProvider(int32_t eventMask, MessageNotifier * eventProvider);
+
+     //@}
 
 /*--------------------Internal Member functions - Private---------------------------------*/
 private:
 
-    /** @name internalFunctionsPrivate */
-    //@{
+        /** @name internalFunctionsPrivate */
+        //@{
 
-    /**  Set the camera parameters specific to Video Recording. */
-    bool        setVideoModeParameters(const CameraParameters&);
+            /** Initialize CameraHal */
+            status_t initialize();
 
-    /** Reset the camera parameters specific to Video Recording. */
-    bool       resetVideoModeParameters();
+            /** Deinitialize CameraHal */
+            void deinitialize();
 
-    /** Restart the preview with setParameter. */
-    status_t        restartPreview();
+            //Reloads the CameraAdapter
+            status_t reloadAdapter();
 
-    status_t parseResolution(const char *resStr, int &width, int &height);
+            status_t parseResolution(const char *resStr, int &width, int &height);
 
-    void insertSupportedParams();
+            void insertSupportedParams();
 
-    /** Allocate preview data buffers */
-    status_t allocPreviewDataBufs(size_t size, size_t bufferCount);
+            //Inserts the supported camera parameters back in CameraProperties
+            void extractSupportedParams();
 
-    /** Free preview data buffers */
-    status_t freePreviewDataBufs();
+            /** Allocate preview data buffers */
+            status_t allocPreviewDataBufs(size_t size, size_t bufferCount);
 
-    /** Allocate preview buffers */
-    status_t allocPreviewBufs(int width, int height, const char* previewFormat, unsigned int bufferCount, unsigned int &max_queueable);
+            /** Free preview data buffers */
+            status_t freePreviewDataBufs();
 
-    /** Allocate video buffers */
-    status_t allocVideoBufs(uint32_t width, uint32_t height, uint32_t bufferCount);
+            /** Allocate preview buffers */
+            status_t allocPreviewBufs(int width, int height, const char* previewFormat);
 
-    /** Allocate image capture buffers */
-    status_t allocImageBufs(unsigned int width, unsigned int height, size_t length, const char* previewFormat, unsigned int bufferCount);
+            /** Allocate video buffers */
+            status_t allocVideoBufs(int width, int height, const char* previewFormat);
 
-    /** Free preview buffers */
-    status_t freePreviewBufs();
+            /** Allocate image capture buffers */
+            status_t allocImageBufs(unsigned int width, unsigned int height, size_t length, const char* previewFormat, unsigned int bufferCount);
 
-    /** Free video bufs */
-    status_t freeVideoBufs(void *bufs);
+            /** Free preview buffers */
+            status_t freePreviewBufs();
 
-    //Check if a given resolution is supported by the current camera
-    //instance
-    bool isResolutionValid(unsigned int width, unsigned int height, const char *supportedResolutions);
+            /** Free video bufs */
+            status_t freeVideoBufs();
 
-    //Check if a given parameter is supported by the current camera
-    // instance
-    bool isParameterValid(const char *param, const char *supportedParams);
-    bool isParameterValid(int param, const char *supportedParams);
-    status_t doesSetParameterNeedUpdate(const char *new_param, const char *old_params, bool &update);
+            //Check if a given resolution is supported by the current camera
+            //instance
+            bool isResolutionValid(unsigned int width, unsigned int height, const char *supportedResolutions);
 
-    /** Initialize default parameters */
-    void initDefaultParameters();
+            //Check if a given parameter is supported by the current camera
+            // instance
+            bool isParameterValid(const char *param, const char *supportedParams);
+            bool isParameterValid(int param, const char *supportedParams);
 
-    void dumpProperties(CameraProperties::Properties& cameraProps);
+            /** Initialize default parameters */
+            void initDefaultParameters();
 
-    status_t startImageBracketing();
+            void dumpProperties(CameraProperties::CameraProperty** cameraProps);
 
-    status_t stopImageBracketing();
+        status_t startImageBracketing();
 
-    void setShutter(bool enable);
+        status_t stopImageBracketing();
 
-    void forceStopPreview();
+        void setShutter(bool enable);
 
-    void selectFPSRange(int framerate, int *min_fps, int *max_fps);
+        //@}
 
-    void setPreferredPreviewRes(int width, int height);
-    void resetPreviewRes(CameraParameters *mParams, int width, int height);
 
-    //@}
 
 
 /*----------Member variables - Public ---------------------*/
@@ -1162,6 +985,7 @@ public:
     nsecs_t mCurrentTime;
     bool mFalsePreview;
     bool mPreviewEnabled;
+    bool mImageCaptureRunning;
     uint32_t mTakePictureQueue;
     bool mBracketingEnabled;
     bool mBracketingRunning;
@@ -1177,13 +1001,7 @@ public:
     sp<MemoryManager> mMemoryManager;
 
     sp<IMemoryHeap> mPictureHeap;
-
-    int* mGrallocHandles;
-    bool mFpsRangeChangedByApp;
-
-
-
-
+    static wp<CameraHardwareInterface> singleton[MAX_CAMERAS_SUPPORTED];
 
 ///static member vars
 
@@ -1202,19 +1020,19 @@ public:
 
 /*----------Member variables - Private ---------------------*/
 private:
-    bool mDynamicPreviewSwitch;
     //keeps paused state of display
     bool mDisplayPaused;
     //Index of current camera adapter
     int mCameraIndex;
+    //When set, reloads Camera Adapter after each stopPreview
+    bool mReloadAdapter;
 
     mutable Mutex mLock;
-
-    sp<SensorListener> mSensorListener;
 
     void* mCameraAdapterHandle;
 
     CameraParameters mParameters;
+    sp<Overlay>  mOverlay;
     bool mPreviewRunning;
     bool mPreviewStateOld;
     bool mRecordingEnabled;
@@ -1237,6 +1055,8 @@ private:
     int mVideoFd;
     int mVideoLength;
 
+    int32_t mLastPreviewFramerate;
+
     int mBracketRangePositive;
     int mBracketRangeNegative;
 
@@ -1244,20 +1064,17 @@ private:
     BufferProvider *mBufProvider;
     BufferProvider *mVideoBufProvider;
 
+    bool mPreviewBufsAllocatedUsingOverlay;
 
-    CameraProperties::Properties* mCameraProperties;
+    CameraProperties::CameraProperty **mCameraPropertiesArr;
 
     bool mPreviewStartInProgress;
 
-    bool mSetPreviewWindowCalled;
+    bool mSetOverlayCalled;
 
     uint32_t mPreviewWidth;
     uint32_t mPreviewHeight;
     int32_t mMaxZoomSupported;
-
-    int mVideoWidth;
-    int mVideoHeight;
-
 };
 
 

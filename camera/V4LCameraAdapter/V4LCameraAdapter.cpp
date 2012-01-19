@@ -1,19 +1,22 @@
 /*
  * Copyright (C) Texas Instruments - http://www.ti.com/
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 /**
 * @file V4LCameraAdapter.cpp
 *
@@ -50,20 +53,21 @@ namespace android {
 
 #undef LOG_TAG
 ///Maintain a separate tag for V4LCameraAdapter logs to isolate issues OMX specific
-#define LOG_TAG "CameraHAL"
+#define LOG_TAG "V4LCameraAdapter"
 
 //frames skipped before recalculating the framerate
 #define FPS_PERIOD 30
 
+static V4LCameraAdapter *gCameraAdapter = NULL;
 Mutex gAdapterLock;
 const char *device = DEVICE;
 
 
 /*--------------------Camera Adapter Class STARTS here-----------------------------*/
 
-status_t V4LCameraAdapter::initialize(CameraProperties::Properties* caps)
+status_t V4LCameraAdapter::initialize(int sensor_index)
 {
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.camera.showfps", value, "0");
@@ -108,7 +112,7 @@ status_t V4LCameraAdapter::initialize(CameraProperties::Properties* caps)
     mVideoInfo->isStreaming = false;
     mRecording = false;
 
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
 
     return ret;
 }
@@ -145,9 +149,30 @@ status_t V4LCameraAdapter::fillThisBuffer(void* frameBuf, CameraFrame::FrameType
 
 }
 
+status_t V4LCameraAdapter::getCaps(CameraParameters &params)
+{
+    LOG_FUNCTION_NAME
+    status_t ret = NO_ERROR;
+    // For now do not populate anything
+    //@todo Enhance this method to populate the capabilities queried from the V4L device.
+    LOG_FUNCTION_NAME_EXIT
+    return ret;
+}
+
+int V4LCameraAdapter::getRevision()
+{
+    LOG_FUNCTION_NAME
+
+    LOG_FUNCTION_NAME_EXIT
+
+    // For now return version 0
+    //@todo Need to query and report the version of the V4L driver
+    return 0;
+}
+
 status_t V4LCameraAdapter::setParameters(const CameraParameters &params)
 {
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     status_t ret = NO_ERROR;
 
@@ -176,28 +201,28 @@ status_t V4LCameraAdapter::setParameters(const CameraParameters &params)
     // Udpate the current parameter set
     mParams = params;
 
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
     return ret;
 }
 
 
 void V4LCameraAdapter::getParameters(CameraParameters& params)
 {
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     // Return the current parameter set
     params = mParams;
 
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
 }
 
 
 ///API to give the buffers to Adapter
-status_t V4LCameraAdapter::useBuffers(CameraMode mode, void* bufArr, int num, size_t length, unsigned int queueable)
+status_t V4LCameraAdapter::useBuffers(CameraMode mode, void* bufArr, int num, size_t length)
 {
     status_t ret = NO_ERROR;
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     Mutex::Autolock lock(mLock);
 
@@ -216,7 +241,7 @@ status_t V4LCameraAdapter::useBuffers(CameraMode mode, void* bufArr, int num, si
 
         }
 
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
 
     return ret;
 }
@@ -398,19 +423,34 @@ char * V4LCameraAdapter::GetFrame(int &index)
     return (char *)mVideoInfo->mem[mVideoInfo->buf.index];
 }
 
-//API to get the frame size required to be allocated. This size is used to override the size passed
-//by camera service when VSTAB/VNF is turned ON for example
-status_t V4LCameraAdapter::getFrameSize(size_t &width, size_t &height)
+status_t V4LCameraAdapter::setTimeOut(unsigned int sec)
 {
     status_t ret = NO_ERROR;
 
-    // Just return the current preview size, nothing more to do here.
-    mParams.getPreviewSize(( int * ) &width,
-                           ( int * ) &height);
-
-    LOG_FUNCTION_NAME_EXIT;
+    gCameraAdapter = NULL;
+    delete this;
 
     return ret;
+}
+
+//API to get the frame size required to be allocated. This size is used to override the size passed
+//by camera service when VSTAB/VNF is turned ON for example
+void V4LCameraAdapter::getFrameSize(int &width, int &height)
+{
+    // Just return the current preview size, nothing more to do here.
+    mParams.getPreviewSize(&width, &height);
+
+    LOG_FUNCTION_NAME_EXIT
+}
+
+int V4LCameraAdapter::getCameraCalStatus()
+{
+    return 0;
+}
+
+bool V4LCameraAdapter::getCameraModuleQueryString(char *str, unsigned long length)
+{
+    return true;
 }
 
 status_t V4LCameraAdapter::getFrameDataSize(size_t &dataFrameSize, size_t bufferCount)
@@ -474,26 +514,19 @@ status_t V4LCameraAdapter::recalculateFPS()
     return NO_ERROR;
 }
 
-void V4LCameraAdapter::onOrientationEvent(uint32_t orientation, uint32_t tilt)
+
+V4LCameraAdapter::V4LCameraAdapter()
 {
-    LOG_FUNCTION_NAME;
-
-    LOG_FUNCTION_NAME_EXIT;
-}
-
-
-V4LCameraAdapter::V4LCameraAdapter(size_t sensor_index)
-{
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     // Nothing useful to do in the constructor
 
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
 }
 
 V4LCameraAdapter::~V4LCameraAdapter()
 {
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
     // Close the camera handle and free the video info structure
     close(mCameraHandle);
@@ -503,8 +536,7 @@ V4LCameraAdapter::~V4LCameraAdapter()
         free(mVideoInfo);
         mVideoInfo = NULL;
       }
-
-    LOG_FUNCTION_NAME_EXIT;
+    LOG_FUNCTION_NAME_EXIT
 }
 
 /* Preview Thread */
@@ -553,6 +585,8 @@ int V4LCameraAdapter::previewThread()
         frame.mOffset = 0;
         frame.mTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);;
 
+        resetFrameRefCount(frame);
+
         ret = sendFrameToSubscribers(&frame);
 
         }
@@ -562,46 +596,24 @@ int V4LCameraAdapter::previewThread()
 
 extern "C" CameraAdapter* CameraAdapter_Factory()
 {
-    CameraAdapter *adapter = NULL;
     Mutex::Autolock lock(gAdapterLock);
 
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
 
-    adapter = new V4LCameraAdapter(sensor_index);
-    if ( adapter ) {
-        CAMHAL_LOGDB("New OMX Camera adapter instance created for sensor %d",sensor_index);
-    } else {
-        CAMHAL_LOGEA("Camera adapter create failed!");
-    }
+    if ( NULL == gCameraAdapter )
+        {
+        CAMHAL_LOGDA("Creating new Camera adapter instance");
+        gCameraAdapter= new V4LCameraAdapter();
+        }
+    else
+        {
+        CAMHAL_LOGDA("Reusing existing Camera adapter instance");
+        }
 
-    LOG_FUNCTION_NAME_EXIT;
 
-    return adapter;
-}
+    LOG_FUNCTION_NAME_EXIT
 
-extern "C" int CameraAdapter_Capabilities(CameraProperties::Properties* properties_array,
-                                          const unsigned int starting_camera,
-                                          const unsigned int max_camera) {
-    int num_cameras_supported = 0;
-    CameraProperties::Properties* properties = NULL;
-
-    LOG_FUNCTION_NAME;
-
-    if(!properties_array)
-    {
-        return -EINVAL;
-    }
-
-    // TODO: Need to tell camera properties what other cameras we can support
-    if (starting_camera + num_cameras_supported < max_camera) {
-        num_cameras_supported++;
-        properties = properties_array + starting_camera;
-        properties->set(CameraProperties::CAMERA_NAME, "USBCamera");
-    }
-
-    LOG_FUNCTION_NAME_EXIT;
-
-    return num_cameras_supported;
+    return gCameraAdapter;
 }
 
 };

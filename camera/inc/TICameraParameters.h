@@ -1,19 +1,22 @@
 /*
  * Copyright (C) Texas Instruments - http://www.ti.com/
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 
 
 
@@ -37,8 +40,13 @@ static const  char KEY_SUPPORTED_CAMERAS[];
 static const char KEY_CAMERA[];
 static const char KEY_CAMERA_NAME[];
 static const  char KEY_S3D_SUPPORTED[];
+static const char  KEY_FACE_DETECTION_ENABLE[];
+static const char  KEY_FACE_DETECTION_DATA[];
+static const char  KEY_FACE_DETECTION_THRESHOLD[];
 static const char  KEY_BURST[];
 static const  char KEY_CAP_MODE[];
+static const  char KEY_VSTAB[];
+static const  char KEY_VSTAB_VALUES[];
 static const  char KEY_VNF[];
 static const  char KEY_SATURATION[];
 static const  char KEY_BRIGHTNESS[];
@@ -59,6 +67,7 @@ static const char  KEY_TEMP_BRACKETING[];
 static const char  KEY_TEMP_BRACKETING_RANGE_POS[];
 static const char  KEY_TEMP_BRACKETING_RANGE_NEG[];
 static const char  KEY_SHUTTER_ENABLE[];
+static const char  KEY_TOUCH_POS[];
 static const char  KEY_MEASUREMENT_ENABLE[];
 static const char  KEY_INITIAL_VALUES[];
 static const char  KEY_GBCE[];
@@ -66,13 +75,15 @@ static const char  KEY_GLBCE[];
 static const char  KEY_MINFRAMERATE[];
 static const char  KEY_MAXFRAMERATE[];
 
-// TI recording hint to notify camera adapters of possible recording
-static const char  KEY_RECORDING_HINT[];
-static const char  KEY_AUTO_FOCUS_LOCK[];
 static const char  KEY_CURRENT_ISO[];
 
 static const char KEY_SENSOR_ORIENTATION[];
 static const char KEY_SENSOR_ORIENTATION_VALUES[];
+
+static const char KEY_S3D_FRAME_LAYOUT[];
+static const char KEY_S3D_FRAME_LAYOUT_VALUES[];
+
+static const char KEY_SEI_ENCODING_TYPE[];
 
 //TI extensions for zoom
 static const char ZOOM_SUPPORTED[];
@@ -112,18 +123,15 @@ static const char VIDEO_MINFRAMERATE_33[];
 //  TI extensions for Manual Gain and Manual Exposure
 static const char KEY_MANUAL_EXPOSURE_LEFT[];
 static const char KEY_MANUAL_EXPOSURE_RIGHT[];
-static const char KEY_MANUAL_EXPOSURE_MODES[];
-static const char KEY_MANUAL_GAIN_EV_RIGHT[];
-static const char KEY_MANUAL_GAIN_EV_LEFT[];
 static const char KEY_MANUAL_GAIN_ISO_RIGHT[];
 static const char KEY_MANUAL_GAIN_ISO_LEFT[];
-static const char KEY_MANUAL_GAIN_MODES[];
 
 //TI extensions for setting EXIF tags
 static const char KEY_EXIF_MODEL[];
 static const char KEY_EXIF_MAKE[];
 
 //TI extensions for additional GPS data
+static const char  KEY_GPS_ALTITUDE_REF[];
 static const char  KEY_GPS_MAPDATUM[];
 static const char  KEY_GPS_VERSION[];
 static const char  KEY_GPS_DATESTAMP[];
@@ -145,9 +153,7 @@ static const char IPP_NONE[];
 //TI extensions to camera mode
 static const char HIGH_PERFORMANCE_MODE[];
 static const char HIGH_QUALITY_MODE[];
-static const char HIGH_QUALITY_ZSL_MODE[];
 static const char VIDEO_MODE[];
-
 
 // TI extensions to standard android pixel formats
 static const char PIXEL_FORMAT_RAW[];
@@ -168,6 +174,10 @@ static const  char SCENE_MODE_BARCODE[];
 static const  char SCENE_MODE_VIDEO_SUPER_NIGHT[];
 static const  char SCENE_MODE_VIDEO_CINE[];
 static const  char SCENE_MODE_VIDEO_OLD_FILM[];
+
+// TI extensions for face detecition
+static const  char FACE_DETECTION_ENABLE[];
+static const  char FACE_DETECTION_DISABLE[];
 
 // TI extensions to standard android white balance settings.
 static const  char WHITE_BALANCE_TUNGSTEN[];
@@ -191,6 +201,8 @@ static const  char EXPOSURE_MODE_FACE[];
 // TI extensions to standard android focus presets.
 static const  char FOCUS_MODE_PORTRAIT[];
 static const  char FOCUS_MODE_EXTENDED[];
+static const  char FOCUS_MODE_CAF[];
+static const  char FOCUS_MODE_TOUCH[];
 static const char  FOCUS_MODE_FACE[];
 
 // TI extensions to add iso values
@@ -211,6 +223,17 @@ static const char EFFECT_BLACKWHITE[];
 
 static const char KEY_S3D2D_PREVIEW[];
 static const char KEY_S3D2D_PREVIEW_MODE[];
+
+//TI extensions for stereo frame layouts
+static const char S3D_TB_FULL[];
+static const char S3D_SS_FULL[];
+static const char S3D_TB_SUBSAMPLED[];
+static const char S3D_SS_SUBSAMPLED[];
+
+//TI extensions for SEI encoding config
+static const char SEI_ENCODING_NONE[];
+static const char SEI_ENCODING_2004[];
+static const char SEI_ENCODING_2010[];
 
 //  TI extensions to add values for AutoConvergence settings.
 static const char AUTOCONVERGENCE_MODE_DISABLE[];

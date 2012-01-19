@@ -1,19 +1,22 @@
 /*
  * Copyright (C) Texas Instruments - http://www.ti.com/
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 
 
 
@@ -23,29 +26,108 @@
 #include <utils/KeyedVector.h>
 #include <utils/String8.h>
 #include <stdio.h>
+#include <libxml/parser.h>
+#include <libxml/xmlreader.h>
+#include <libxml/xmlwriter.h>
+#include <libxml/tree.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
-#include "cutils/properties.h"
+
 
 namespace android {
 
-#define MAX_CAMERAS_SUPPORTED 2
-#define MAX_SIMUL_CAMERAS_SUPPORTED 1
+#define MAX_CAMERAS_SUPPORTED 6
 #define MAX_PROP_NAME_LENGTH 50
 #define MAX_PROP_VALUE_LENGTH 2048
 
-#define EXIF_MAKE_DEFAULT "default_make"
-#define EXIF_MODEL_DEFAULT "default_model"
 
-// Class that handles the Camera Properties
-class CameraProperties
+///Class that handles the Camera Properties
+class CameraProperties : public RefBase
 {
 public:
+    enum CameraPropertyIndex
+        {
+        PROP_INDEX_INVALID = 0,
+        PROP_INDEX_CAMERA_NAME,
+        PROP_INDEX_CAMERA_ADAPTER_DLL_NAME,
+        PROP_INDEX_CAMERA_SENSOR_INDEX,
+        PROP_INDEX_ORIENTATION_INDEX,
+        PROP_INDEX_FACING_INDEX,
+        PROP_INDEX_SUPPORTED_PREVIEW_SIZES,
+        PROP_INDEX_SUPPORTED_PREVIEW_FORMATS,
+        PROP_INDEX_SUPPORTED_PREVIEW_FRAME_RATES,
+        PROP_INDEX_SUPPORTED_PICTURE_SIZES,
+        PROP_INDEX_SUPPORTED_PICTURE_FORMATS,
+        PROP_INDEX_SUPPORTED_THUMBNAIL_SIZES,
+        PROP_INDEX_SUPPORTED_WHITE_BALANCE,
+        PROP_INDEX_SUPPORTED_EFFECTS,
+        PROP_INDEX_SUPPORTED_ANTIBANDING,
+        PROP_INDEX_SUPPORTED_EXPOSURE_MODES,
+        PROP_INDEX_SUPPORTED_EV_MAX,
+        PROP_INDEX_SUPPORTED_EV_MIN,
+        PROP_INDEX_SUPPORTED_EV_STEP,
+        PROP_INDEX_SUPPORTED_ISO_VALUES,
+        PROP_INDEX_SUPPORTED_SCENE_MODES,
+        PROP_INDEX_SUPPORTED_FLASH_MODES,
+        PROP_INDEX_SUPPORTED_FOCUS_MODES,
+        PROP_INDEX_SUPPORTED_IPP_MODES,
+        PROP_INDEX_REQUIRED_PREVIEW_BUFS,
+        PROP_INDEX_REQUIRED_IMAGE_BUFS,
+        PROP_INDEX_SUPPORTED_ZOOM_RATIOS,
+        PROP_INDEX_SUPPORTED_ZOOM_STAGES,
+        PROP_INDEX_ZOOM_SUPPORTED,
+        PROP_INDEX_SMOOTH_ZOOM_SUPPORTED,
+        PROP_INDEX_PREVIEW_SIZE,
+        PROP_INDEX_PREVIEW_FORMAT,
+        PROP_INDEX_PREVIEW_FRAME_RATE,
+        PROP_INDEX_ZOOM,
+        PROP_INDEX_PICTURE_SIZE,
+        PROP_INDEX_PICTURE_FORMAT,
+        PROP_INDEX_JPEG_THUMBNAIL_SIZE,
+        PROP_INDEX_WHITEBALANCE,
+        PROP_INDEX_EFFECT,
+        PROP_INDEX_ANTIBANDING,
+        PROP_INDEX_EXPOSURE_MODE,
+        PROP_INDEX_EV_COMPENSATION,
+        PROP_INDEX_ISO_MODE,
+        PROP_INDEX_FOCUS_MODE,
+        PROP_INDEX_SCENE_MODE,
+        PROP_INDEX_FLASH_MODE,
+        PROP_INDEX_JPEG_QUALITY,
+        PROP_INDEX_CONTRAST,
+        PROP_INDEX_SATURATION,
+        PROP_INDEX_BRIGHTNESS,
+        PROP_INDEX_SHARPNESS,
+        PROP_INDEX_IPP,
+        PROP_INDEX_S3D_SUPPORTED,
+        PROP_INDEX_S3D2D_PREVIEW,
+        PROP_INDEX_S3D2D_PREVIEW_MODES,
+        PROP_INDEX_AUTOCONVERGENCE,
+        PROP_INDEX_AUTOCONVERGENCE_MODE,
+        PROP_INDEX_MANUALCONVERGENCE_VALUES,
+        PROP_INDEX_VSTAB,
+        PROP_INDEX_VSTAB_VALUES,
+        PROP_INDEX_FRAMERATE_RANGE,
+        PROP_INDEX_FRAMERATE_RANGE_SUPPORTED,
+        PROP_INDEX_SENSOR_ORIENTATION,
+        PROP_INDEX_SENSOR_ORIENTATION_VALUES,
+        PROP_INDEX_REVISION,
+        PROP_INDEX_FOCAL_LENGTH,
+        PROP_INDEX_HOR_ANGLE,
+        PROP_INDEX_VER_ANGLE,
+        PROP_INDEX_EXIF_MAKE,
+        PROP_INDEX_EXIF_MODEL,
+        PROP_INDEX_JPEG_THUMBNAIL_QUALITY,
+        PROP_INDEX_S3D_FRAME_LAYOUT,
+        PROP_INDEX_S3D_FRAME_LAYOUT_VALUES,
+        PROP_INDEX_MAX
+        };
+
     static const char INVALID[];
     static const char CAMERA_NAME[];
+    static const char ADAPTER_DLL_NAME[];
     static const char CAMERA_SENSOR_INDEX[];
     static const char ORIENTATION_INDEX[];
     static const char FACING_INDEX[];
@@ -96,7 +178,6 @@ public:
     static const char SHARPNESS[];
     static const char CONTRAST[];
     static const char IPP[];
-    static const char GBCE[];
     static const char AUTOCONVERGENCE[];
     static const char AUTOCONVERGENCE_MODE[];
     static const char MANUALCONVERGENCE_VALUES[];
@@ -109,86 +190,61 @@ public:
     static const char EXIF_MAKE[];
     static const char EXIF_MODEL[];
     static const char JPEG_THUMBNAIL_QUALITY[];
-    static const char MAX_FOCUS_AREAS[];
-    static const char MAX_FD_HW_FACES[];
-    static const char MAX_FD_SW_FACES[];
 
     static const char PARAMS_DELIMITER [];
 
+    static const char TICAMERA_FILE_PREFIX[];
+    static const char TICAMERA_FILE_EXTN[];
     static const char S3D2D_PREVIEW[];
     static const char S3D2D_PREVIEW_MODES[];
     static const char VSTAB[];
-    static const char VSTAB_SUPPORTED[];
+    static const char VSTAB_VALUES[];
     static const char FRAMERATE_RANGE[];
-    static const char FRAMERATE_RANGE_IMAGE[];
-    static const char FRAMERATE_RANGE_VIDEO[];
     static const char FRAMERATE_RANGE_SUPPORTED[];
+    static const char S3D_FRAME_LAYOUT[];
+    static const char S3D_FRAME_LAYOUT_VALUES[];
 
-    static const char DEFAULT_VALUE[];
+    class CameraProperty
+        {
+        public:
+            CameraProperty(const char *propName, const char *propValue)
+                {
+                  strncpy(mPropName, propName, sizeof(mPropName)-1);
+                  strncpy(mPropValue, propValue, sizeof(mPropValue)-1);
+                }
+            status_t setValue(const char * value);
 
-    static const char AUTO_EXPOSURE_LOCK[];
-    static const char AUTO_EXPOSURE_LOCK_SUPPORTED[];
-    static const char AUTO_WHITEBALANCE_LOCK[];
-    static const char AUTO_WHITEBALANCE_LOCK_SUPPORTED[];
-    static const char MAX_NUM_METERING_AREAS[];
-    static const char METERING_AREAS[];
-    static const char MAX_NUM_FOCUS_AREAS[];
+        public:
+            char mPropName[MAX_PROP_NAME_LENGTH];
+            char mPropValue[MAX_PROP_VALUE_LENGTH];
 
-    static const char VIDEO_SNAPSHOT_SUPPORTED[];
-
-    static const char VIDEO_SIZE[];
-    static const char SUPPORTED_VIDEO_SIZES[];
-    static const char PREFERRED_PREVIEW_SIZE_FOR_VIDEO[];
+        };
 
     CameraProperties();
     ~CameraProperties();
 
-    // container class passed around for accessing properties
-    class Properties
-    {
-        public:
-            Properties()
-            {
-                mProperties = new DefaultKeyedVector<String8, String8>(String8(DEFAULT_VALUE));
-                char property[PROPERTY_VALUE_MAX];
-                property_get("ro.product.manufacturer", property, EXIF_MAKE_DEFAULT);
-                property[0] = toupper(property[0]);
-                set(EXIF_MAKE, property);
-                property_get("ro.product.model", property, EXIF_MODEL_DEFAULT);
-                property[0] = toupper(property[0]);
-                set(EXIF_MODEL, property);
-            }
-            ~Properties()
-            {
-                delete mProperties;
-            }
-            ssize_t set(const char *prop, const char *value);
-            ssize_t set(const char *prop, int value);
-            const char* get(const char * prop);
-            void dump();
-
-        protected:
-            const char* keyAt(unsigned int);
-            const char* valueAt(unsigned int);
-
-        private:
-            DefaultKeyedVector<String8, String8>* mProperties;
-
-    };
-
     ///Initializes the CameraProperties class
     status_t initialize();
     status_t loadProperties();
+    status_t storeProperties();
     int camerasSupported();
-    int getProperties(int cameraIndex, Properties** properties);
+    CameraProperty** getProperties(int cameraIndex);
 
 private:
+    status_t parseAndLoadProps(const char* file);
+    status_t parseCameraElements(xmlTextReaderPtr &reader);
+    status_t storeCameraElements(xmlTextWriterPtr &writer);
+    status_t freeCameraProps(int cameraIndex);
+    status_t createPropertiesArray(CameraProperties::CameraProperty** &cameraProps);
+    CameraProperties::CameraPropertyIndex getCameraPropertyIndex(const char* propName);
+    const char* getCameraPropertyKey(CameraProperties::CameraPropertyIndex index);
+    void refreshProperties();
 
-    uint32_t mCamerasSupported;
-    int mInitialized;
-    mutable Mutex mLock;
+    ////Choosing 268 because "system/etc/"+ dir_name(0...255) can be max 268 chars
+    char mXMLFullPath[268];
 
-    Properties mCameraProps[MAX_CAMERAS_SUPPORTED];
+    int32_t mCamerasSupported;
+    CameraProperty *mCameraProps[MAX_CAMERAS_SUPPORTED][CameraProperties::PROP_INDEX_MAX];
 
 };
 

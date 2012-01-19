@@ -15,23 +15,70 @@
 # This file lists the modules that are specific to OMAP4 but are used by
 # all OMAP4 devices.
 
-PRODUCT_PACKAGES := \
-	libdomx \
-	libOMX_Core \
-	libOMX.TI.DUCATI1.VIDEO.H264E \
-	libOMX.TI.DUCATI1.VIDEO.MPEG4E \
-	libOMX.TI.DUCATI1.VIDEO.DECODER \
-	libOMX.TI.DUCATI1.VIDEO.DECODER.secure \
-	libOMX.TI.DUCATI1.VIDEO.CAMERA \
-	libOMX.TI.DUCATI1.MISC.SAMPLE \
-	libstagefrighthw \
-        libI420colorconvert \
-	libtiutils \
-	libcamera \
-	libion \
-	camera.omap4 \
-	libomxcameraadapter \
-	hwcomposer.omap4 \
-	smc_pa_ctrl \
-	tf_daemon
+#	libtiutils \
+# OMX
+PRODUCT_PACKAGES += \
+    OMXCore \
+    libOMX_CoreOsal \
+    libOMX_Core \
+    libomx_rpc \
+    libomx_proxy_common \
+    libOMX.TI.DUCATI1.VIDEO.H264D \
+    libOMX.TI.DUCATI1.VIDEO.MPEG4D \
+    libOMX.TI.DUCATI1.VIDEO.VP6D \
+    libOMX.TI.DUCATI1.VIDEO.VP7D \
+    libOMX.TI.DUCATI1.VIDEO.H264E \
+    libOMX.TI.DUCATI1.VIDEO.MPEG4E \
+    libOMX.TI.DUCATI1.IMAGE.JPEGD \
+    libOMX.TI.DUCATI1.VIDEO.CAMERA \
+    libOMX.TI.DUCATI1.MISC.SAMPLE \
+    libOMX.TI.DUCATI1.VIDEO.DECODER \
+    libOMX_ResourceManagerProxy \
+    libVendor_ti_omx \
+    libVendor_ti_omx_config_parser \
+    libstagefrighthw \
+    libI420colorconvert \
+    camera.omap4 \
+    libomxcameraadapter \
+    hwcomposer.omap4 \
+    smc_pa_ctrl \
+    tf_daemon
+
+# Syslink and Tiler
+PRODUCT_PACKAGES += \
+    libd2cmap \
+    libipc \
+    libipcutils \
+    libnotify \
+    libomap_mm_library_jni \
+    librcm \
+    libsyslink_ipc_listener \
+    libsysmgr \
+    libtimemmgr \
+    dmm_daemontest.out \
+    ducati_load.out \
+    event_listener.out \
+    gateMPApp.out \
+    heapBufMPApp.out \
+    heapMemMPApp.out \
+    interm3.out \
+    listMPApp.out \
+    memmgrserver.out \
+    messageQApp.out \
+    nameServerApp.out \
+    notifyping.out \
+    procMgrApp.out \
+    rcm_daemontest.out \
+    rcm_multiclienttest.out \
+    rcm_multitest.out \
+    rcm_multithreadtest.out \
+    rcm_singletest.out \
+    sharedRegionApp.out \
+    slpmresources.out \
+    slpmtest.out \
+    slpmtransport.out \
+    syslink_daemon.out \
+    syslink_tilertest.out \
+    syslink_trace_daemon.out \
+    utilsApp.out \
 

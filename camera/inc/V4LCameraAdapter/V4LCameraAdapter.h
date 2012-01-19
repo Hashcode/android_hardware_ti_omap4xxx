@@ -1,19 +1,22 @@
 /*
  * Copyright (C) Texas Instruments - http://www.ti.com/
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 
 
 #ifndef V4L_CAMERA_ADAPTER_H
@@ -69,11 +72,17 @@ public:
 
 
     ///Initialzes the camera adapter creates any resources required
-    virtual status_t initialize(CameraProperties::Properties*, int sensor_index=0);
+    virtual status_t initialize(int sensor_index=0);
 
     //APIs to configure Camera adapter and get the current parameter set
     virtual status_t setParameters(const CameraParameters& params);
     virtual void getParameters(CameraParameters& params);
+
+    //API to get the caps
+    virtual status_t getCaps(CameraParameters &params);
+
+    //Used together with capabilities
+    virtual int getRevision();
 
     // API
     virtual status_t UseBuffersPreview(void* bufArr, int num);
@@ -81,17 +90,22 @@ public:
     //API to flush the buffers for preview
     status_t flushBuffers();
 
+    //API to get the frame size required to be allocated. This size is used to override the size passed
+    //by camera service when VSTAB/VNF is turned ON for example
+    virtual void getFrameSize(int &width, int &height);
+
+    virtual status_t getPictureBufferSize(size_t &length, size_t bufferCount);
+
+    virtual status_t getFrameDataSize(size_t &dataFrameSize, size_t bufferCount);
+
 protected:
 
 //----------Parent class method implementation------------------------------------
+    virtual status_t setTimeOut(unsigned int sec);
     virtual status_t startPreview();
     virtual status_t stopPreview();
-    virtual status_t useBuffers(CameraMode mode, void* bufArr, int num, size_t length, unsigned int queueable);
+    virtual status_t useBuffers(CameraMode mode, void* bufArr, int num, size_t length);
     virtual status_t fillThisBuffer(void* frameBuf, CameraFrame::FrameType frameType);
-    virtual status_t getFrameSize(size_t &width, size_t &height);
-    virtual status_t getPictureBufferSize(size_t &length, size_t bufferCount);
-    virtual status_t getFrameDataSize(size_t &dataFrameSize, size_t bufferCount);
-    virtual void onOrientationEvent(uint32_t orientation, uint32_t tilt);
 //-----------------------------------------------------------------------------
 
 
@@ -101,7 +115,14 @@ private:
             V4LCameraAdapter* mAdapter;
         public:
             PreviewThread(V4LCameraAdapter* hw) :
-                    Thread(false), mAdapter(hw) { }
+#ifdef SINGLE_PROCESS
+                // In single process mode this thread needs to be a java thread,
+                // since we won't be calling through the binder.
+                Thread(true),
+#else
+                Thread(false),
+#endif
+                  mAdapter(hw) { }
             virtual void onFirstRef() {
                 run("CameraPreviewThread", PRIORITY_URGENT_DISPLAY);
             }

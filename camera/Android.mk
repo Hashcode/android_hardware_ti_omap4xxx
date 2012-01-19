@@ -1,90 +1,175 @@
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
 
+
+#
+# MotHDR Wrapper
+#
+
+#LOCAL_PATH:= $(call my-dir)
+#include $(CLEAR_VARS)
+
+#######
+
+#
+# libcamera
+#
+
 LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
 
-OMAP4_CAMERA_HAL_USES:= OMX
-# OMAP4_CAMERA_HAL_USES:= USB
+LOCAL_SRC_FILES:= \
+    CameraHalM.cpp \
+    CameraHal.cpp \
+    CameraHalUtilClasses.cpp \
+    AppCallbackNotifier.cpp \
+    MemoryManager.cpp	\
+    ANativeWindowDisplayAdapter.cpp \
+    CameraProperties.cpp \
+    TICameraParameters.cpp \
 
-OMAP4_CAMERA_HAL_SRC := \
-	CameraHal_Module.cpp \
-	CameraHal.cpp \
-	CameraHalUtilClasses.cpp \
-	AppCallbackNotifier.cpp \
-	ANativeWindowDisplayAdapter.cpp \
-	CameraProperties.cpp \
-	MemoryManager.cpp \
-	Encoder_libjpeg.cpp \
-	SensorListener.cpp  \
-	NV12_resize.c
+#    $(LOCAL_PATH)/../inc/HDRInterface \
+LOCAL_C_INCLUDES += \
+    bionic/libc/include \
+    frameworks/base/include/ui \
+    frameworks/base/include/utils \
+    $(LOCAL_PATH)/inc \
+    $(LOCAL_PATH)/../hwc \
+    $(LOCAL_PATH)/../libtiutils \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/omx_core/inc \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/mm_osal/inc \
+    $(LOCAL_PATH)/../../tiler \
+    $(LOCAL_PATH)/../../syslink/ipc-listener \
+    external/libxml2/include \
+    external/icu4c/common \
 
-OMAP4_CAMERA_COMMON_SRC:= \
-	CameraParameters.cpp \
-	TICameraParameters.cpp \
-	CameraHalCommon.cpp
+LOCAL_SHARED_LIBRARIES:= \
+    libdl \
+    libui \
+    libbinder \
+    libutils \
+    libcutils \
+    libtiutils \
+    libtimemmgr \
+    libicuuc \
+    libcamera_client \
+    libsyslink_ipc_listener \
+    libhdr_interface \
 
-OMAP4_CAMERA_OMX_SRC:= \
-	BaseCameraAdapter.cpp \
-	OMXCameraAdapter/OMX3A.cpp \
-	OMXCameraAdapter/OMXAlgo.cpp \
-	OMXCameraAdapter/OMXCameraAdapter.cpp \
-	OMXCameraAdapter/OMXCapabilities.cpp \
-	OMXCameraAdapter/OMXCapture.cpp \
-	OMXCameraAdapter/OMXDefaults.cpp \
-	OMXCameraAdapter/OMXExif.cpp \
-	OMXCameraAdapter/OMXFD.cpp \
-	OMXCameraAdapter/OMXFocus.cpp \
-	OMXCameraAdapter/OMXZoom.cpp \
+LOCAL_CFLAGS += -fno-short-enums -DCOPY_IMAGE_BUFFER -DTARGET_OMAP4 -mfpu=neon
 
-OMAP4_CAMERA_USB_SRC:= \
-	BaseCameraAdapter.cpp \
-	V4LCameraAdapter/V4LCameraAdapter.cpp
+LOCAL_MODULE:= libcamera
+LOCAL_MODULE_TAGS:= optional
+
+include $(BUILD_SHARED_LIBRARY)
+
+#######
+
+#
+# OMX Camera Adapter 
+#
+
+LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES:= \
+    BaseCameraAdapter.cpp \
+    OMXCameraAdapter/OMXCap.cpp \
+    OMXCameraAdapter/OMXCameraAdapter.cpp \
+
+LOCAL_C_INCLUDES += \
+    $(LOCAL_PATH)/inc/ \
+    $(LOCAL_PATH)/inc/OMXCameraAdapter \
+    $(LOCAL_PATH)/../hwc \
+    $(LOCAL_PATH)/../libtiutils \
+    external/icu4c/common \
+
+LOCAL_SHARED_LIBRARIES:= \
+    libdl \
+    libui \
+    libbinder \
+    libutils \
+    libcutils \
+    libtiutils \
+    libOMX_CoreOsal \
+    libOMX_Core \
+    libsysmgr \
+    librcm \
+    libipc \
+    libcamera \
+    libicuuc \
+    libcamera_client \
+    libomx_rpc \
+    libhdr_interface \
+    libhardware_legacy \
+
+LOCAL_C_INCLUDES += \
+    bionic/libc/include \
+    frameworks/base/include/ui \
+    frameworks/base/include/utils \
+    $(LOCAL_PATH)/../libtiutils \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/omx_core/inc \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/mm_osal/inc \
+    external/libxml2/include \
+
+LOCAL_CFLAGS += -fno-short-enums -DTARGET_OMAP4
+
+LOCAL_MODULE:= libomxcameraadapter
+LOCAL_MODULE_TAGS:= optional
+
+include $(BUILD_SHARED_LIBRARY)
+
+#######
 
 #
 # OMX Camera HAL 
 #
 
-ifeq ($(OMAP4_CAMERA_HAL_USES),OMX)
-
+LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES:= \
-	$(OMAP4_CAMERA_HAL_SRC) \
-	$(OMAP4_CAMERA_OMX_SRC) \
-	$(OMAP4_CAMERA_COMMON_SRC)
+    CameraHal_Module.cpp
 
 LOCAL_C_INCLUDES += \
-    $(LOCAL_PATH)/inc/ \
-    $(LOCAL_PATH)/../hwc \
-    $(LOCAL_PATH)/../include \
-    $(LOCAL_PATH)/inc/OMXCameraAdapter \
-    $(LOCAL_PATH)/../libtiutils \
-    hardware/ti/omap4xxx/tiler \
-    hardware/ti/omap4xxx/ion \
+    bionic/libc/include \
     frameworks/base/include/ui \
     frameworks/base/include/utils \
-    hardware/ti/omap4xxx/domx/omx_core/inc \
-    hardware/ti/omap4xxx/domx/mm_osal/inc \
-    frameworks/base/include/media/stagefright \
-    frameworks/base/include/media/stagefright/openmax \
-    external/jpeg \
-    external/jhead
+    $(LOCAL_PATH)/inc \
+    $(LOCAL_PATH)/../libtiutils \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/omx_core/inc \
+    $(LOCAL_PATH)/../../omx/ducati/domx/system/mm_osal/inc \
+    $(LOCAL_PATH)/../../../../external/libxml2/include \
+    $(LOCAL_PATH)/../../tiler \
+    $(LOCAL_PATH)/../../syslink/ipc-listener \
+    $(LOCAL_PATH)/../hwc \
+    external/icu4c/common \
+
 
 LOCAL_SHARED_LIBRARIES:= \
+    libcamera \
+    libomxcameraadapter \
+    libdl \
     libui \
     libbinder \
     libutils \
     libcutils \
     libtiutils \
-    libmm_osal \
+    libOMX_CoreOsal \
     libOMX_Core \
+    libsysmgr \
+    librcm \
+    libipc \
+    libcamera \
+    libicuuc \
     libcamera_client \
-    libgui \
-    libdomx \
-    libion \
-    libjpeg \
-    libexif
+    libomx_rpc \
+    libhdr_interface \
+    libhardware_legacy \
 
-LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER
+LOCAL_STATIC_LIBRARIES:= \
+    libxml2 \
+
+LOCAL_CFLAGS += -fno-short-enums -DCOPY_IMAGE_BUFFER -DTARGET_OMAP4 -mfpu=neon
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_MODULE:= camera.$(TARGET_BOARD_PLATFORM)
@@ -92,48 +177,4 @@ LOCAL_MODULE_TAGS:= optional
 
 include $(BUILD_HEAPTRACKED_SHARED_LIBRARY)
 
-else
-ifeq ($(OMAP4_CAMERA_HAL_USES),USB)
-
-#
-# USB Camera Adapter
-#
-
-include $(CLEAR_VARS)
-
-LOCAL_SRC_FILES:= \
-	$(OMAP4_CAMERA_HAL_SRC) \
-	$(OMAP4_CAMERA_USB_SRC) \
-	$(OMAP4_CAMERA_COMMON_SRC)
-
-LOCAL_C_INCLUDES += \
-    $(LOCAL_PATH)/inc/ \
-    $(LOCAL_PATH)/../hwc \
-    $(LOCAL_PATH)/../include \
-    $(LOCAL_PATH)/inc/V4LCameraAdapter \
-    $(LOCAL_PATH)/../libtiutils \
-    hardware/ti/omap4xxx/tiler \
-    hardware/ti/omap4xxx/ion \
-    frameworks/base/include/ui \
-    frameworks/base/include/utils \
-    frameworks/base/include/media/stagefright/openmax
-
-LOCAL_SHARED_LIBRARIES:= \
-    libui \
-    libbinder \
-    libutils \
-    libcutils \
-    libtiutils \
-    libcamera_client \
-    libion \
-
-LOCAL_CFLAGS := -fno-short-enums -DCOPY_IMAGE_BUFFER
-
-LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
-LOCAL_MODULE:= camera.$(TARGET_BOARD_PLATFORM)
-LOCAL_MODULE_TAGS:= optional
-
-include $(BUILD_HEAPTRACKED_SHARED_LIBRARY)
-endif
-endif 
 endif

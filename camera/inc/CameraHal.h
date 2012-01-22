@@ -39,12 +39,13 @@
 #include "binder/MemoryBase.h"
 #include "binder/MemoryHeapBase.h"
 #include <utils/threads.h>
-#include <ui/Overlay.h>
-#include <camera/CameraHardwareInterface.h>
-#include "MessageQueue.h"
-#include "Semaphore.h"
+//#include <ul/Overlay.h>
+#include <ui/FramebufferNativeWindow.h>
+//#include <camera/CameraHardwareInterface.h>
+#include <MessageQueue.h>
+#include <Semaphore.h>
 #include "CameraProperties.h"
-#include "DebugUtils.h"
+//#include "DebugUtils.h"
 
 #define MIN_WIDTH           640
 #define MIN_HEIGHT          480

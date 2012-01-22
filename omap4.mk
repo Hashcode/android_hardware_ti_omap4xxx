@@ -33,13 +33,11 @@ PRODUCT_PACKAGES += \
     libOMX.TI.DUCATI1.VIDEO.CAMERA \
     libOMX.TI.DUCATI1.MISC.SAMPLE \
     libOMX.TI.DUCATI1.VIDEO.DECODER \
-    libOMX_ResourceManagerProxy \
-    libVendor_ti_omx \
-    libVendor_ti_omx_config_parser \
     libstagefrighthw \
     libI420colorconvert \
-    camera.omap4 \
+    libcamera \
     libomxcameraadapter \
+    camera.omap4 \
     hwcomposer.omap4 \
     smc_pa_ctrl \
     tf_daemon

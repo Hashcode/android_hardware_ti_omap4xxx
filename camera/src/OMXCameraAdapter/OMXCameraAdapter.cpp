@@ -28,6 +28,7 @@
 #include "OMXCameraAdapter.h"
 #include "ErrorUtils.h"
 #include "TICameraParameters.h"
+#include "MotHDRInterface.h"
 #include <signal.h>
 #include <math.h>
 #include <time.h>

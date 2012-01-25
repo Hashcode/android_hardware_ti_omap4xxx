@@ -30,16 +30,16 @@ BUILD_HEAPTRACKED_SHARED_LIBRARY:=$(BUILD_SHARED_LIBRARY)
 BUILD_HEAPTRACKED_EXECUTABLE:= $(BUILD_EXECUTABLE)
 endif
 
-#camera/src \
-ifeq ($(TARGET_BOARD_PLATFORM),omap4)
-    SUBDIRS := \
-               domx \
-               hwc \
-               libI420colorconvert \
-               libstagefrighthw \
-               libtiutils \
-               security \
-               test/CameraHal
-    include $(call all-named-subdir-makefiles, $(SUBDIRS))
-endif
+#    camera/src \
 
+SUBDIRS := \
+    domx \
+    hwc \
+    libI420colorconvert \
+    libstagefrighthw \
+    libtiutils \
+    security \
+    test/CameraHal
+include $(call all-named-subdir-makefiles, $(SUBDIRS))
+
+endif

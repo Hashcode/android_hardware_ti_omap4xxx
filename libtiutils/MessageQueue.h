@@ -47,7 +47,7 @@
 #define MSGQ_LOGEB DBGUTILS_LOGEB
 
 
-namespace TIUTILS {
+namespace android {
 
 ///Message type
 struct Message

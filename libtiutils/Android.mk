@@ -19,10 +19,10 @@ LOCAL_SHARED_LIBRARIES:= \
     libcutils
 
 LOCAL_C_INCLUDES += \
-	frameworks/base/include/utils \
-	bionic/libc/include \
-	hardware/ti/omx/ducati/domx/system/omx_core/inc \
-	hardware/ti/omx/ducati/domx/system/mm_osal/inc
+    $(TOP)/frameworks/base/include/utils \
+    $(TOP)/bionic/libc/include \
+    $(TOP)/hardware/ti/omap4xxx/domx/system/omx_core/inc \
+    $(TOP)/hardware/ti/omap4xxx/domx/system/mm_osal/inc
 	
 LOCAL_CFLAGS += -fno-short-enums 
 

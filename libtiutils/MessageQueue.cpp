@@ -29,7 +29,7 @@
 
 #include "MessageQueue.h"
 
-namespace TIUTILS {
+namespace android {
 
 /**
    @brief Constructor for the message queue class

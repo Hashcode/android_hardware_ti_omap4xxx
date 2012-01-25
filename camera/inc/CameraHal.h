@@ -41,9 +41,9 @@
 #include <utils/threads.h>
 //#include <ul/Overlay.h>
 #include <ui/FramebufferNativeWindow.h>
-//#include <camera/CameraHardwareInterface.h>
-#include <MessageQueue.h>
-#include <Semaphore.h>
+#include "CameraHardwareInterface.h"
+#include "MessageQueue.h"
+#include "Semaphore.h"
 #include "CameraProperties.h"
 //#include "DebugUtils.h"
 

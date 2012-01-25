@@ -4,13 +4,15 @@ include $(CLEAR_VARS)
 
 # prerequisites for building libcamera
 file := $(LIBCAMERA_INTERMEDIATES_PREREQS)/libhdr_interface.so
-$(file) : device/motorola/solana/prebuilt/lib/libhdr_interface.so
+$(file) : vendor/motorola/solana/proprietary/libhdr_interface.so
 	@echo "Copy libhdr_interface.so -> $@"
 	@mkdir -p $(dir $@)
 	@rm -rf $@
-	$(hide) cp -a device/motorola/solana/prebuilt/lib/libhdr_interface.so $@
+	$(hide) cp -a vendor/motorola/solana/proprietary/libhdr_interface.so $@
 
-LOCAL_SRC_FILES:= CameraHalM.cpp
+LOCAL_SRC_FILES:= \
+    CameraHalM.cpp \
+
 #    CameraHal.cpp \
 #    CameraHalUtilClasses.cpp \
 #    AppCallbackNotifier.cpp \
@@ -20,13 +22,19 @@ LOCAL_SRC_FILES:= CameraHalM.cpp
 #    TICameraParameters.cpp
 
 #    $(LOCAL_PATH)/../inc/HDRInterface \
+
 LOCAL_C_INCLUDES += \
-    $(TOP)/hardware/ti/omap4xxx/camera/inc
-#    hardware/ti/omap4xxx/hwc/ \
-#    hardware/ti/tiler/ \
-#    hardware/ti/syslink/ipc-listener/ \
-#    external/libxml2/include/ \
-#    external/icu4c/common/
+    $(TOP)/hardware/ti/omap4xxx/camera/inc \
+    $(TOP)/hardware/ti/omap4xxx/domx/system/mm_osal/inc \
+    $(TOP)/hardware/ti/omap4xxx/domx/system/omx_core/inc \
+    $(TOP)/hardware/ti/omap4xxx/hwc \
+    $(TOP)/hardware/ti/omap4xxx/libtiutils \
+    $(TOP)/hardware/ti/tiler \
+    $(TOP)/hardware/ti/syslink/ipc-listener \
+    $(TOP)/external/libxml2/include \
+    $(TOP)/external/icu4c/common \
+    $(TOP)/frameworks/base/include/utils \
+    $(TOP)/frameworks/base/services/camera/libcameraservice \
 
 
 LOCAL_SHARED_LIBRARIES:= \
@@ -44,13 +52,6 @@ LOCAL_SHARED_LIBRARIES:= \
 
 LOCAL_STATIC_LIBRARIES:= \
     libxml2
-
-#LOCAL_C_INCLUDES += \
-#    bionic/libc/include/ \
-#    frameworks/base/include/ui/ \
-#    hardware/ti/omap4xxx/libtiutils/ \
-#    frameworks/base/include/utils/ \
-#    frameworks/base/services/libcameraservice/
 
 LOCAL_CFLAGS += -fno-short-enums -DCOPY_IMAGE_BUFFER -DTARGET_OMAP4 -mfpu=neon
 

@@ -420,6 +420,9 @@ typedef enum OMX_EXTIMAGEFILTERTYPE {
     OMX_TI_ImageFilterBlackBoard,
     OMX_TI_ImageFilterAqua,
     OMX_TI_ImageFilterPosterize,
+    OMX_TI_ImageFilterRedTint,
+    OMX_TI_ImageFilterGreenTint,
+    OMX_TI_ImageFilterBlueTint,
     OMX_ImageFilterTypeMax = 0x7fffffff
 } OMX_EXTIMAGEFILTERTYPE;
 
@@ -527,6 +530,7 @@ typedef enum OMX_CAMOPERATINGMODETYPE {
     OMX_CaptureVideo,
     OMX_CaptureHighSpeedVideo,
     OMX_CaptureVideoMemoryInput,
+    OMX_CaptureImageProfileBasePlusSOC,
     OMX_TI_CaptureDummy,
     OMX_TI_CaptureGestureRecognition,
     OMX_CamOperatingModeMax = 0x7fffffff

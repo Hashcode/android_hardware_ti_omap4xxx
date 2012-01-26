@@ -15,10 +15,10 @@
 # This file lists the modules that are specific to OMAP4 but are used by
 # all OMAP4 devices.
 
-#	libtiutils \
 # OMX
 PRODUCT_PACKAGES += \
     OMXCore \
+    libI420colorconvert \
     libOMX_CoreOsal \
     libOMX_Core \
     libomx_rpc \
@@ -34,10 +34,7 @@ PRODUCT_PACKAGES += \
     libOMX.TI.DUCATI1.MISC.SAMPLE \
     libOMX.TI.DUCATI1.VIDEO.DECODER \
     libstagefrighthw \
-    libI420colorconvert \
-    libcamera \
-    libomxcameraadapter \
-    camera.omap4 \
+    libtiutils \
     hwcomposer.omap4 \
     smc_pa_ctrl \
     tf_daemon

@@ -34,6 +34,7 @@ SUBDIRS := \
     domx \
     hwc \
     libI420colorconvert \
+    liboverlay \
     libstagefrighthw \
     libtiutils \
     security \

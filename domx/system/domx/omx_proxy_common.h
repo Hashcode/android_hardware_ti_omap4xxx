@@ -165,6 +165,32 @@ extern "C"
 		OMX_BOOL bRemoteAllocatedBuffer;
 	} PROXY_BUFFER_INFO;
 
+/* FIXME-HASH: added for ICS support */
+/*===============================================================*/
+/** PROXY_BUFFER_TYPE        : This enumeration tells the type of buffer pointers coming to OMX in 
+				UseBuffer call.
+ */
+/*===============================================================*/
+	typedef enum PROXY_BUFFER_TYPE
+	{
+		VirtualPointers,   /*Used when buffer pointers come from the normal A9 virtual space */
+		GrallocPointers,   /*Used when buffer pointers come from Gralloc allocations */
+		IONPointers,       /*Used when buffer pointers come from ION allocations */
+		EncoderMetadataPointers		/*Used when buffer pointers come from Stagefright in camcorder usecase */
+	} PROXY_BUFFER_TYPE;
+
+/*===============================================================*/
+/** PROXY_BUFFER_TYPE        : This enumeration tells the type of buffer pointers coming to OMX in
+                               UseBuffer call.
+ */
+/*===============================================================*/
+	typedef struct PROXY_PORT_TYPE
+	{
+		PROXY_BUFFER_TYPE proxyBufferType;   /*Used when buffer pointers come from the normal A9 virtual space */
+		OMX_U32 IsBuffer2D;   /*Used when buffer pointers come from Gralloc allocations */
+	} PROXY_PORT_TYPE;
+/* END-FIXME-HASH: added for ICS support */
+
 /* ========================================================================== */
 /**
 * PROXY_COMPONENT_PRIVATE
@@ -179,6 +205,8 @@ extern "C"
 		RPC_OMX_HANDLE hRemoteComp;
 
 		PROXY_BUFFER_INFO tBufList[MAX_NUM_PROXY_BUFFERS];
+                /* FIXME-HASH: added for ICS Support */
+		// PROXY_PORT_TYPE proxyPortBuffers[PROXY_MAXNUMOFPORTS];
 		OMX_U32 nTotalBuffers;
 		OMX_U32 nAllocatedBuffers;
 

@@ -68,6 +68,7 @@
 #include "omx_rpc_stub.h"
 #include "omx_rpc_utils.h"
 #include "log_func_calls.h"
+#include "OMX_TI_IVCommon.h"
 
 #ifdef TILER_BUFF
 #include <ProcMgr.h>
@@ -370,7 +371,6 @@ static OMX_ERRORTYPE PROXY_EmptyBufferDone(OMX_HANDLETYPE hComponent,
 	OMX_ERRORTYPE eError = OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv = NULL;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
-
 	OMX_U16 count;
 	OMX_BUFFERHEADERTYPE *pBufHdr = NULL;
 
@@ -443,9 +443,7 @@ static OMX_ERRORTYPE PROXY_FillBufferDone(OMX_HANDLETYPE hComponent,
 	OMX_ERRORTYPE eError = OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv = NULL;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
-#ifdef USE_MOTOROLA_CODE
-        RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
-#endif
+    RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
 
 	OMX_U16 count;
 	OMX_BUFFERHEADERTYPE *pBufHdr = NULL;
@@ -484,8 +482,6 @@ static OMX_ERRORTYPE PROXY_FillBufferDone(OMX_HANDLETYPE hComponent,
 				    pMarkData)->hComponentActual;
 				TIMM_OSAL_Free(pMarkData);
 			}
-
-#ifdef USE_MOTOROLA_CODE
                         // Perform Cache Invalidate for video encoders only
                         if(!strcmp(pCompPrv->cCompName,"OMX.TI.DUCATI1.VIDEO.MPEG4E") || 
                            !strcmp(pCompPrv->cCompName,"OMX.TI.DUCATI1.VIDEO.H264E")) 
@@ -515,7 +511,6 @@ static OMX_ERRORTYPE PROXY_FillBufferDone(OMX_HANDLETYPE hComponent,
 				}
 			    }
                         }
-#endif
 			break;
 		}
 	}
@@ -788,7 +783,6 @@ static OMX_ERRORTYPE PROXY_FillThisBuffer(OMX_HANDLETYPE hComponent,
 	RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
-
 	OMX_U32 count = 0;
 	OMX_U8 *pBuffer = NULL;
 	OMX_U32 pBufToBeMapped = 0;
@@ -862,23 +856,13 @@ static OMX_ERRORTYPE PROXY_FillThisBuffer(OMX_HANDLETYPE hComponent,
 /* Since invalidate functionality is broken, workaround is to call a cache
  * flush here. This will be removed once a fix for invalidate is available.*/
 	/*Flushing non tiler buffers only for now */
-#ifdef USE_MOTOROLA_CODE
 	if ((pCompPrv->tBufList[count].pBufferActual !=
 	    pCompPrv->tBufList[count].pBufferToBeMapped) &&
             (pBufferHdr->nAllocLen > 0))
-#else
-	if (pCompPrv->tBufList[count].pBufferActual !=
-	    pCompPrv->tBufList[count].pBufferToBeMapped)
-#endif
 	{
 		eRPCError =
-#ifdef USE_MOTOROLA_CODE
 		    RPC_InvalidateBuffer(pBuffer, pBufferHdr->nAllocLen,
 		    TARGET_CORE_ID);
-#else
-		    RPC_FlushBuffer(pBuffer, pBufferHdr->nAllocLen,
-		    TARGET_CORE_ID);
-#endif
 		PROXY_assert(eRPCError == RPC_OMX_ErrorNone,
 		    OMX_ErrorHardware, "Flush Buffer failed");
 	}
@@ -1139,9 +1123,7 @@ static OMX_ERRORTYPE PROXY_UseBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 		PROXY_assert(0, OMX_ErrorInsufficientResources, NULL);
 	}
 	pBufferHeader->pPlatformPrivate = pPlatformPrivate;
-#ifdef USE_MOTOROLA_CODE
-    pBufferHeader->nAllocLen = nSizeBytes;
-#endif
+        pBufferHeader->nAllocLen = nSizeBytes;
 	DOMX_DEBUG("Preparing buffer to Remote Core...");
 
 	pBufferHeader->pBuffer = pBuffer;
@@ -1398,6 +1380,9 @@ static OMX_ERRORTYPE PROXY_SetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 	RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
+#ifdef ENABLE_GRALLOC_BUFFERS
+	OMX_TI_PARAMUSENATIVEBUFFER *pParamNativeBuffer = NULL;
+#endif
 
 	PROXY_require((pParamStruct != NULL), OMX_ErrorBadParameter, NULL);
 
@@ -1410,9 +1395,28 @@ static OMX_ERRORTYPE PROXY_SetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 	    ("hComponent=%p, pCompPrv=%p, nParamIndex=%d, pParamStruct=%p",
 	    hComponent, pCompPrv, nParamIndex, pParamStruct);
 
+#ifdef ENABLE_GRALLOC_BUFFERS
+        switch(nParamIndex) {
+            case OMX_TI_IndexUseNativeBuffers:
+            {
+                //Add check version.
+                pParamNativeBuffer = (OMX_TI_PARAMUSENATIVEBUFFER* )pParamStruct;
+                if(pParamNativeBuffer->bEnable == OMX_TRUE) {
+                    pCompPrv->proxyPortBuffers[pParamNativeBuffer->nPortIndex].proxyBufferType = GrallocPointers;
+                    pCompPrv->proxyPortBuffers[pParamNativeBuffer->nPortIndex].IsBuffer2D = OMX_TRUE;
+                }
+                break;
+            }
+            default:
+                eRPCError =
+                    RPC_SetParameter(pCompPrv->hRemoteComp, nParamIndex, pParamStruct,
+                    &eCompReturn);
+	}
+#else
 	eRPCError =
 	    RPC_SetParameter(pCompPrv->hRemoteComp, nParamIndex, pParamStruct,
 	    &eCompReturn);
+#endif
 
 	PROXY_checkRpcError();
 

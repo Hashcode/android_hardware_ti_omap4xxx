@@ -6,6 +6,7 @@ include $(CLEAR_VARS)
 TI_DOMX_TOP := hardware/ti/omap4xxx/domx
 
 TI_OMX_CFLAGS := -Wall -fpic -pipe -DSTATIC_TABLE -O0
+#  -DENABLE_GRALLOC_BUFFERS
 
 #call build domx infrastructure
 include $(TI_DOMX_TOP)/system/mm_osal/src/Android.mk

@@ -36,6 +36,7 @@ PRODUCT_PACKAGES += \
     libstagefrighthw \
     libtiutils \
     hwcomposer.omap4 \
+    overlay.omap4 \
     smc_pa_ctrl \
     tf_daemon
 

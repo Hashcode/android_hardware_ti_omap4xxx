@@ -1,4 +1,5 @@
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
+ifndef LEGACY_DOMX
 
 LOCAL_PATH:= $(call my-dir)
 HARDWARE_TI_OMAP4_BASE:= $(LOCAL_PATH)
@@ -37,4 +38,6 @@ else
 endif
 
 include $(call first-makefiles-under,$(LOCAL_PATH))
+
+endif # LEGACY_DOMX
 endif

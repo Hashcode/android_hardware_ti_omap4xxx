@@ -26,7 +26,7 @@ LOCAL_SRC_FILES := hwc_init.cpp hwc.cpp hwc_dss.cpp hwc_buffers.cpp hwc_hdmi.cpp
 
 LOCAL_MODULE_TAGS := optional
 LOCAL_C_INCLUDES := \
-    hardware/ti/omap4xxx/tiler \
+    hardware/ti/tiler \
     hardware/ti/omap4xxx/include
 
 LOCAL_MODULE := hwcomposer.omap4

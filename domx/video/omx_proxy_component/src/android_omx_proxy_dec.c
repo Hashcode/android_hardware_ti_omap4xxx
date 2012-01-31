@@ -203,22 +203,6 @@ static OMX_ERRORTYPE PrearrageEmptyThisBuffer(OMX_HANDLETYPE hComponent,
 		PROXY_assert(hComp->pComponentPrivate != NULL, OMX_ErrorBadParameter, NULL);
 
 		pCompPrv = (PROXY_COMPONENT_PRIVATE *) hComp->pComponentPrivate;
-#ifndef USE_MOTOROLA_CODE
-		/* Get component role */
-		OMX_PARAM_COMPONENTROLETYPE compRole;
-		compRole.nSize = sizeof(OMX_PARAM_COMPONENTROLETYPE);
-		compRole.nVersion.s.nVersionMajor = 1;
-		compRole.nVersion.s.nVersionMinor = 1; //Ducati OMX version
-		compRole.nVersion.s.nRevision = 0;
-		compRole.nVersion.s.nStep = 0;
-
-		eError = PROXY_GetParameter(hComp, OMX_IndexParamStandardComponentRole, &compRole);
-		if(eError != OMX_ErrorNone){
-			LOGE("%s::%d:Error getting OMX_IndexParamStandardComponentRole", __FUNCTION__, __LINE__);
-		}
-
-		if(!strcmp(compRole.cRole, "video_decoder.wmv")){
-#endif
 		pBuffer = pBufferHdr->pBuffer;
 
 		VIDDEC_WMV_RCV_header  hBufferRCV;
@@ -296,9 +280,6 @@ static OMX_ERRORTYPE PrearrageEmptyThisBuffer(OMX_HANDLETYPE hComponent,
 			pBufferHdr->nFilledLen -= 52;
 
 			TIMM_OSAL_Free(pTempBuf);
-#ifndef USE_MOTOROLA_CODE
-			}
-#endif
 		}
 	}
 

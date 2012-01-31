@@ -128,12 +128,10 @@ static OMX_ERRORTYPE ComponentPrivateDeInit(OMX_IN OMX_HANDLETYPE hComponent)
 			TIMM_OSAL_Error("Mutex Obtain failed");
 		}
 
-#ifdef USE_MOTOROLA_CODE
 		if (numofInstance == 1)
 		{
 			DCC_DeInit();
 		}
-#endif
 		numofInstance = numofInstance - 1;
 
 		eOsalError = TIMM_OSAL_MutexRelease(cam_mutex);
@@ -228,10 +226,9 @@ static OMX_ERRORTYPE CameraGetConfig(OMX_IN OMX_HANDLETYPE
 
 	switch (nParamIndex)
 	{
-	case OMX_TI_IndexConfigAAAskipBuffer:
-	case OMX_TI_IndexConfigCamCapabilities:
 	case OMX_TI_IndexConfigExifTags:
-	case OMX_TI_IndexConfigAlgoAreas:
+	case OMX_TI_IndexConfigCamCapabilities:
+	case OMX_TI_IndexConfigAAAskipBuffer:
 		pConfigSharedBuffer =
 			(OMX_TI_CONFIG_SHAREDBUFFER *) pComponentParameterStructure;
 
@@ -318,10 +315,9 @@ static OMX_ERRORTYPE CameraSetConfig(OMX_IN OMX_HANDLETYPE
 
 	switch (nParamIndex)
 	{
-	case OMX_TI_IndexConfigAAAskipBuffer:
-	case OMX_TI_IndexConfigCamCapabilities:
 	case OMX_TI_IndexConfigExifTags:
-	case OMX_TI_IndexConfigAlgoAreas:
+	case OMX_TI_IndexConfigCamCapabilities:
+	case OMX_TI_IndexConfigAAAskipBuffer:
 		pConfigSharedBuffer =
 			(OMX_TI_CONFIG_SHAREDBUFFER *)
 			pComponentParameterStructure;
@@ -525,16 +521,6 @@ OMX_ERRORTYPE DCC_Init(OMX_HANDLETYPE hComponent)
 	}
 
 	dccbuf_size = read_DCCdir(NULL, dcc_dir, nIndex);
-
-#ifndef USE_MOTOROLA_CODE
-    // If there are no dcc files return error, so nothing is sent to ducati
-    if(dccbuf_size <= 0)
-    {
-        DOMX_DEBUG("No dcc files are found!!!");
-        eError = OMX_ErrorNoMore;
-        goto EXIT;
-    }
-#endif
 
 	PROXY_assert(dccbuf_size > 0, OMX_ErrorInsufficientResources,
 	    "No DCC files found, switching back to default DCC");

@@ -57,14 +57,12 @@ extern "C" {
 #define MAX_URI_LENGTH      (OMX_MAX_STRINGNAME_SIZE)
 #define MAX_ALGOAREAS       (35)
 
-#ifdef USE_MOTOROLA_CODE
 // Size of sensor EEPROM in bytes.
 // Note: This size is also defined in
 //       WTSD_DucatiMMSW/framework/camera/Cam_sysstate.h
 //       WTSD_DucatiMMSW/omx/omx_il_1_x/omx_core/omx_ti_ivcommon.h
 //       If you change it here, change it also there.
 #define SENSOR_EEPROM_SIZE  (256)
-#endif
 
 #define DCC_PATH  "/system/etc/omapcam/"
 
@@ -1142,18 +1140,35 @@ typedef enum OMX_BARCODETYPE
  *	eBarcodetype is an enumeration specifying the barcode type, as listed in the given table.
  */
 typedef struct OMX_BARCODEDETECTIONTYPE {
+	OMX_U32 nSize;
+	OMX_VERSIONTYPE nVersion;
+	OMX_U32 nPortIndex;
+	OMX_TI_CAMERAVIEWTYPE eCameraView;
+	OMX_S32 nLeft;
+	OMX_S32 nTop;
+	OMX_U32 nWidth;
+	OMX_U32 nHeight;
+	OMX_S32 nOrientation;
+	OMX_BARCODETYPE eBarcodetype;
+ } OMX_BARCODEDETECTIONTYPE;
+
+/**
+ * Front object detection data
+ *	nLeft is the leftmost coordinate of the detected area rectangle.
+ *	nTop is the topmost coordinate of the detected area rectangle.
+ *	nWidth is the width of the detected area rectangle in pixels.
+ *	nHeight is the height of the detected area rectangle in pixels.
+ */
+typedef struct OMX_FRONTOBJDETECTIONTYPE {
     OMX_U32 nSize;
     OMX_VERSIONTYPE nVersion;
     OMX_U32 nPortIndex;
     OMX_TI_CAMERAVIEWTYPE eCameraView;
-    OMX_S32 nLeft;                  /**< The leftmost coordinate of the detected area rectangle */
-    OMX_S32 nTop;                   /**< Topmost coordinate of the detected area rectangle */
-    OMX_U32 nWidth;                 /**< The width of the detected area rectangle in pixels */
-    OMX_U32 nHeight;                /**< The height of the detected area rectangle in pixels */
-    OMX_S32 nOrientation;           /**< The orientation of the axis of the detected object.
-                                         This refers to the angle between the vertical axis of barcode and the horizontal axis */
-    OMX_BARCODETYPE eBarcodetype;   /**< An enumeration specifying the barcode type, as listed in the given table */
-} OMX_BARCODEDETECTIONTYPE;
+    OMX_S32 nLeft;
+    OMX_S32 nTop;
+    OMX_U32 nWidth;
+    OMX_U32 nHeight;
+} OMX_FRONTOBJDETECTIONTYPE;
 
 /**
  * Distance estimation data
@@ -1284,24 +1299,6 @@ typedef enum OMX_OBJDETECTQUALITY {
 }OMX_OBJDETECTQUALITY;
 
 /**
- * Front object detection data
- *	nLeft is the leftmost coordinate of the detected area rectangle.
- *	nTop is the topmost coordinate of the detected area rectangle.
- *	nWidth is the width of the detected area rectangle in pixels.
- *	nHeight is the height of the detected area rectangle in pixels.
- */
-typedef struct OMX_FRONTOBJDETECTIONTYPE {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nPortIndex;
-    OMX_TI_CAMERAVIEWTYPE eCameraView;
-    OMX_S32 nLeft;              /**< The leftmost coordinate of the detected area rectangle */
-    OMX_S32 nTop;               /**< The topmost coordinate of the detected area rectangle */
-    OMX_U32 nWidth;             /**< The width of the detected area rectangle in pixels */
-    OMX_U32 nHeight;            /**< The height of the detected area rectangle in pixels */
-} OMX_FRONTOBJDETECTIONTYPE;
-
-/**
  * OBJECT DETECTION Type
  *      nPortIndex: is an output port. The port index decides on which port the extra data structur of detected object is sent on.
  *      bEnable : this controls ON/OFF for this object detection algirithm.
@@ -1331,8 +1328,6 @@ typedef struct OMX_CONFIG_OBJDETECTIONTYPE {
     OMX_U32 nHeight;
     OMX_OBJDETECTQUALITY eObjDetectQuality;
     OMX_U32 nPriority;
-    /* FIXME-HASH: Added for ICS Support (not found in GB DOMX) */
-    OMX_U32 nDeviceOrientation;
 } OMX_CONFIG_OBJDETECTIONTYPE;
 
 
@@ -2018,7 +2013,6 @@ typedef enum OMX_TI_COLOR_FORMATTYPE {
     OMX_TI_ColorFormatTypeMax = 0x7fffffff
 } OMX_TI_COLOR_FORMATTYPE;
 
-#ifdef USE_MOTOROLA_CODE
 // Motorola specific -begin
 
 /**
@@ -2126,7 +2120,6 @@ typedef struct OMX_CONFIG_OTPEEPROM {
 	OMX_BOOL bValid;
 }OMX_CONFIG_OTPEEPROM;
 // Motorola specific - end
-#endif
 
 /**
  * The OMX_TI_EXIFTAGSTATUS enumeration is used to define the
@@ -2561,9 +2554,6 @@ typedef struct OMX_TI_CAPTYPE {
     OMX_U16 ulCapVarFPSModesCount;                  // supported variable FPS capture modes count
     OMX_TI_VARFPSTYPE tCapVarFPSModes[10];
     OMX_TI_SENMOUNT_TYPE tSenMounting;
-    /* FIXME-HASH: Added for ICS Support (Not found in GB DOMX) */
-    OMX_U16 ulAlgoAreasFocusCount;    // supported number of AlgoAreas for focus areas
-    OMX_U16 ulAlgoAreasExposureCount; // supported number of AlgoAreas for exposure areas
 } OMX_TI_CAPTYPE;
 
 /**
@@ -2705,122 +2695,6 @@ typedef struct OMX_TI_CONFIG_VARFRMRANGETYPE {
     OMX_U32 xMin;
     OMX_U32 xMax;
 } OMX_TI_CONFIG_VARFRMRANGETYPE;
-
-/* FIXME-HASH: Added below all of the ICS Support structs (Not found in GB DOMX) */
-/**
-* A pointer to this struct is passed to the OMX_SetParameter when the extension
-* index for the 'OMX.google.android.index.enableAndroidNativeBuffers' extension
-* is given.
-* The corresponding extension Index is OMX_TI_IndexUseNativeBuffers.
-* This will be used to inform OMX about the presence of gralloc pointers instead
-* of virtual pointers
-*/
-typedef struct OMX_TI_PARAMUSENATIVEBUFFER {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nPortIndex;
-    OMX_BOOL bEnable;
-} OMX_TI_PARAMUSENATIVEBUFFER;
-
-/**
-* A pointer to this struct is passed to OMX_GetParameter when the extension
-* index for the 'OMX.google.android.index.getAndroidNativeBufferUsage'
-* extension is given.
-* The corresponding extension Index is OMX_TI_IndexAndroidNativeBufferUsage.
-* The usage bits returned from this query will be used to allocate the Gralloc
-* buffers that get passed to the useAndroidNativeBuffer command.
-*/
-typedef struct OMX_TI_PARAMNATIVEBUFFERUSAGE {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nPortIndex;
-    OMX_U32 nUsage;
-} OMX_TI_PARAMNATIVEBUFFERUSAGE;
-
-/*==========================================================================*/
-/*!
-@brief OMX_TI_PARAM_ENHANCEDPORTRECONFIG : Suport added to new port reconfig usage
-@param bUsePortReconfigForCrop       Enables port reconfig for crop.
-@param bUsePortReconfigForPadding    Enables port reconfig for padding
-*/
-/*==========================================================================*/
-
-typedef struct OMX_TI_PARAM_ENHANCEDPORTRECONFIG {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nPortIndex;
-    OMX_BOOL bUsePortReconfigForCrop;
-    OMX_BOOL bUsePortReconfigForPadding;
-} OMX_TI_PARAM_ENHANCEDPORTRECONFIG;
-
-/**
-* Define the frames queue len for ZSL
-*
-* STRUCT MEMBERS:
-* nSize: Size of the structure in bytes
-* nVersion: OMX specification version information
-* nHistoryLen: History len in number of frames
-*/
-typedef struct OMX_TI_PARAM_ZSLHISTORYLENTYPE {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nHistoryLen;
-} OMX_TI_PARAM_ZSLHISTORYLENTYPE;
-
-/**
-* Define the frame delay in ms for ZSL
-*
-* STRUCT MEMBERS:
-* nSize: Size of the structure in bytes
-* nVersion: OMX specification version information
-* nDelay: Capture frame delay in ms
-*/
-typedef struct OMX_TI_CONFIG_ZSLDELAYTYPE {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_S32 nDelay;
-} OMX_TI_CONFIG_ZSLDELAYTYPE;
-
-/**
- * AlogAreas purpose
- * This type specifies the purpose of areas specified in OMX_ALGOAREASTYPE.
- * */
-typedef enum OMX_ALGOAREAPURPOSE{
-    OMX_AlgoAreaFocus = 0, // Multi region focus
-    OMX_AlgoAreaExposure,
-}OMX_ALGOAREAPURPOSE;
-
-typedef  struct OMX_ALGOAREA {
-    OMX_S32 nLeft;                      /**< The leftmost coordinate of the area rectangle */
-    OMX_S32 nTop;                       /**< The topmost coordinate of the area rectangle */
-    OMX_U32 nWidth;                     /**< The width of the area rectangle in pixels */
-    OMX_U32 nHeight;                    /**< The height of the area rectangle in pixels */
-    OMX_U32 nPriority;                  /**< Priority - ranges from 1 to 1000 */
-}OMX_ALGOAREA;
-
-/**
- * Algorythm areas type
- * This type defines areas for Multi Region Focus,
- * or another algorithm region parameters,
- * such as Multi Region Auto Exposure.
- *
- * STRUCT MEMBERS:
- *  nSize            : Size of the structure in bytes
- *  nVersion         : OMX specification version information
- *  nPortIndex       : Port index
- *  tAreaPosition    : Area definition - coordinates and purpose - Multi Region Focus, Auto Exposure, etc.
- *  nNumAreas        : Number of areas defined in the array
- *  nAlgoAreaPurpose : Algo area purpose - eg. Multi Region Focus is OMX_AlgoAreaFocus
- */
-typedef  struct OMX_ALGOAREASTYPE {
-    OMX_U32 nSize;
-    OMX_VERSIONTYPE nVersion;
-    OMX_U32 nPortIndex;
-
-    OMX_U32 nNumAreas;
-    OMX_ALGOAREA tAlgoAreas[MAX_ALGOAREAS];
-    OMX_ALGOAREAPURPOSE nAlgoAreaPurpose;
-} OMX_ALGOAREASTYPE;
 
 #ifdef __cplusplus
 }

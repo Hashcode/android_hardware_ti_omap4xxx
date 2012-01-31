@@ -1380,9 +1380,6 @@ static OMX_ERRORTYPE PROXY_SetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 	RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
-#ifdef ENABLE_GRALLOC_BUFFERS
-	OMX_TI_PARAMUSENATIVEBUFFER *pParamNativeBuffer = NULL;
-#endif
 
 	PROXY_require((pParamStruct != NULL), OMX_ErrorBadParameter, NULL);
 
@@ -1395,28 +1392,9 @@ static OMX_ERRORTYPE PROXY_SetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 	    ("hComponent=%p, pCompPrv=%p, nParamIndex=%d, pParamStruct=%p",
 	    hComponent, pCompPrv, nParamIndex, pParamStruct);
 
-#ifdef ENABLE_GRALLOC_BUFFERS
-        switch(nParamIndex) {
-            case OMX_TI_IndexUseNativeBuffers:
-            {
-                //Add check version.
-                pParamNativeBuffer = (OMX_TI_PARAMUSENATIVEBUFFER* )pParamStruct;
-                if(pParamNativeBuffer->bEnable == OMX_TRUE) {
-                    pCompPrv->proxyPortBuffers[pParamNativeBuffer->nPortIndex].proxyBufferType = GrallocPointers;
-                    pCompPrv->proxyPortBuffers[pParamNativeBuffer->nPortIndex].IsBuffer2D = OMX_TRUE;
-                }
-                break;
-            }
-            default:
-                eRPCError =
-                    RPC_SetParameter(pCompPrv->hRemoteComp, nParamIndex, pParamStruct,
-                    &eCompReturn);
-	}
-#else
 	eRPCError =
 	    RPC_SetParameter(pCompPrv->hRemoteComp, nParamIndex, pParamStruct,
 	    &eCompReturn);
-#endif
 
 	PROXY_checkRpcError();
 

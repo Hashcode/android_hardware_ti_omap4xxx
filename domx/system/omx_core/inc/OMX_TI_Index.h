@@ -105,6 +105,7 @@ typedef enum OMX_TI_INDEXTYPE {
     OMX_IndexConfigSensorCal,                           /**< 0x7F000017 reference: OMX_CONFIG_SENSORCALTYPE */
     OMX_IndexConfigISOSetting,                          /**< 0x7F000018 reference: OMX_CONFIG_ISOSETTINGTYPE */
     OMX_TI_IndexConfigSceneMode,                        /**< 0x7F000019 reference: OMX_CONFIG_SCENEMODETYPE */
+
     OMX_IndexConfigDigitalZoomSpeed,                    /**< 0x7F00001A reference: OMX_CONFIG_DIGITALZOOMSPEEDTYPE */
     OMX_IndexConfigDigitalZoomTarget,                   /**< 0x7F00001B reference: OMX_CONFIG_DIGITALZOOMTARGETTYPE */
     OMX_IndexConfigCommonScaleQuality,                  /**< 0x7F00001C reference: OMX_CONFIG_SCALEQUALITYTYPE */
@@ -177,6 +178,7 @@ typedef enum OMX_TI_INDEXTYPE {
     OMX_TI_IndexParamDccUriBuffer,                         /**< 0x7F00005C reference: OMX_TI_CONFIG_SHAREDBUFFER */
     /* MPEG4 and H264 encoder specific Indices */
     OMX_TI_IndexParamVideoIntraRefresh,                 /**< 0x7F00005D reference: OMX_TI_VIDEO_PARAM_INTRAREFRESHTYPE */
+
     OMX_TI_IndexConfigShutterCallback,                  /**< 0x7F00005E reference: OMX_CONFIG_BOOLEANTYPE */
     OMX_TI_IndexParamVarFrameRate,                      /**< 0x7F00005F reference: OMX_PARAM_VARFARAMERATETYPE */
     OMX_TI_IndexConfigAutoConvergence,                  /**< 0x7F000060 reference: OMX_TI_CONFIG_CONVERGENCETYPE */
@@ -199,19 +201,6 @@ typedef enum OMX_TI_INDEXTYPE {
     OMX_TI_IndexConfigAVCHRDBufferSizeSetting,   /**< reference: OMX_TI_VIDEO_CONFIG_AVCHRDBUFFERSETTING */
     OMX_TI_IndexConfigFocusDistance,              /**< reference: OMX_TI_CONFIG_FOCUSDISTANCETYPE */
 
-    /* FIXME-HASH: Added for ICS Support */
-    OMX_TI_IndexUseNativeBuffers,                /**< reference: OMX_TI_ParamUseNativeBuffer */
-    OMX_TI_IndexParamUseEnhancedPortReconfig,     /**< reference: OMX_TI_IndexParamUseEnhancedPortReconfig */
-    OMX_TI_IndexEncoderStoreMetadatInBuffers,
-    OMX_TI_IndexParamZslHistoryLen,                     /**< reference: OMX_TI_PARAM_ZSLHISTORYLENTYPE */
-    OMX_TI_IndexConfigZslDelay,                          /**< reference: OMX_TI_CONFIG_ZSLDELAYTYPE */
-    OMX_TI_IndexParamMetaDataBufferInfo,                  /***< reference: OMX_TI_PARAM_METADATABUFFERINFO */
-    OMX_TI_IndexConfigZslFrameSelectMethod,              /**< reference: OMX_TI_CONFIG_ZSLFRAMESELECTMETHODTYPE */
-    OMX_TI_IndexAndroidNativeBufferUsage,          /**< reference: OMX_TI_IndexAndroidNativeBufferUsage */
-    OMX_TI_IndexConfigAlgoAreas,                         /**< reference: OMX_PARAM_SHAREDBUFFER (pSharedBuff is OMX_ALGOAREASTYPE) */
-    OMX_TI_IndexConfigAutofocusEnable,             /**< reference: OMX_CONFIG_BOOLEANTYPE */
-
-#ifdef USE_MOTOROLA_CODE
     // Motorola specific - begin
     // Note! This section must be placed at the bottom of this enum.
     OMX_IndexConfigTargetExposure = ((OMX_INDEXTYPE)OMX_IndexVendorStartUnused + 0x2000),                       /**< reference: OMX_CONFIG_TARGETEXPOSURE */
@@ -221,9 +210,10 @@ typedef enum OMX_TI_INDEXTYPE {
 	OMX_IndexConfigLedIntensity,						  /**< reference: OMX_CONFIG_LEDINTESITY */
     OMX_IndexConfigOTPEeprom,							 /**< reference: OMX_CONFIG_OTPEEPROM */
     // Motorola specific - end
-#endif
 
 } OMX_TI_INDEXTYPE;
+
+
 
 /*******************************************************************
  * PRIVATE DECLARATIONS: defined here, used only here
